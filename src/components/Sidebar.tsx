@@ -4,6 +4,7 @@ import type { FileEntry, SidebarView } from "../types";
 import { fileIcon, fileIconColor } from "../utils/icons";
 import SourceControlSidebar from "./SourceControlSidebar";
 import SearchSidebar from "./SearchSidebar";
+import Icon from "./Icon";
 
 interface Props {
   view: SidebarView;
@@ -45,11 +46,11 @@ export default function Sidebar({ view, fileTree, activeFilePath, onOpenFile, on
         />
       );
     case "debug":
-      return <PlaceholderSidebar title="RUN AND DEBUG" icon="▶" text="Debug" />;
+      return <PlaceholderSidebar title="RUN AND DEBUG" icon="material-symbols:play-arrow" text="Debug" />;
     case "extensions":
-      return <PlaceholderSidebar title="EXTENSIONS" icon="◆" text="Extensions" />;
+      return <PlaceholderSidebar title="EXTENSIONS" icon="material-symbols:extension" text="Extensions" />;
     case "ai":
-      return <PlaceholderSidebar title="AI CHAT" icon="✦" text="AI" description="Use the right-side chat panel for AI interactions." />;
+      return <PlaceholderSidebar title="AI CHAT" icon="material-symbols:auto-awesome" text="AI" description="Use the right-side chat panel for AI interactions." />;
     default:
       return null;
   }
@@ -125,7 +126,9 @@ function ExplorerSidebar({
       <div className="sidebar-content">
         {localTree.length === 0 && !loading && (
           <div className="sidebar-placeholder">
-            <div className="sidebar-placeholder-icon">📁</div>
+            <div className="sidebar-placeholder-icon">
+            <Icon icon="material-symbols:folder-open" size={28} />
+          </div>
             <div className="sidebar-placeholder-text">No folder open</div>
             <div className="sidebar-placeholder-text" style={{ fontSize: 11 }}>
               Open a folder to explore files
@@ -212,7 +215,9 @@ function PlaceholderSidebar({
         <span className="sidebar-header-title">{title}</span>
       </div>
       <div className="sidebar-placeholder">
-        <div className="sidebar-placeholder-icon">{icon}</div>
+        <div className="sidebar-placeholder-icon">
+          <Icon icon={icon} size={28} />
+        </div>
         <div className="sidebar-placeholder-text">{text}</div>
         {description && (
           <div className="sidebar-placeholder-text" style={{ fontSize: 11 }}>

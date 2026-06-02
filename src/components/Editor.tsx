@@ -1,4 +1,5 @@
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import Editor, { OnMount, OnChange } from "@monaco-editor/react";
 import type { OpenFile } from "../types";
 
@@ -6,6 +7,7 @@ interface Props {
   file: OpenFile;
   onContentChange: (content: string) => void;
   onSave?: (path: string, content: string) => void;
+  gitRoot?: string;
 }
 
 const languageMap: Record<string, string> = {
@@ -34,16 +36,19 @@ const languageMap: Record<string, string> = {
   plaintext: "plaintext",
 };
 
-export default function MonacoEditor({ file, onContentChange, onSave }: Props) {
+export default function MonacoEditor({ file, onContentChange, onSave, gitRoot }: Props) {
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const monacoRef = useRef<typeof import("monaco-editor") | null>(null);
+  const decorationsRef = useRef<string[]>([]);
 
-  const handleEditorDidMount: OnMount = useCallback((editor) => {
+  const handleEditorDidMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor;
+    monacoRef.current = monaco as any;
 
     // Register Ctrl+S command
     editor.addCommand(
       // KeyMod.CtrlCmd | KeyCode.KeyS
-      2048 | 49, // CtrlCmd + S
+      2048 | 49,
       () => {
         if (onSave) {
           const content = editor.getValue();
@@ -65,6 +70,47 @@ export default function MonacoEditor({ file, onContentChange, onSave }: Props) {
   );
 
   const language = languageMap[file.language] || "plaintext";
+
+  // Fetch gutter decorations when file or gitRoot changes
+  useEffect(() => {
+    if (!gitRoot || !file.path || !editorRef.current || !monacoRef.current) return;
+
+    const loadGutter = async () => {
+      try {
+        const decorations = await invoke<{ line_number: number; kind: string }[]>("git_file_gutter", {
+          path: gitRoot,
+          filePath: file.path,
+        });
+
+        const monaco = monacoRef.current!;
+        const editor = editorRef.current!;
+        const model = editor.getModel();
+        if (!model) return;
+
+        const newDecorations = decorations.map((d) => ({
+          range: new monaco.Range(d.line_number, 1, d.line_number, 1),
+          options: {
+            isWholeLine: true,
+            glyphMarginClassName: `git-gutter-${d.kind}`,
+            glyphMarginHoverMessage: {
+              value:
+                d.kind === "modified"
+                  ? "Modified"
+                  : d.kind === "added"
+                  ? "Added"
+                  : "Deleted",
+            },
+          },
+        }));
+
+        decorationsRef.current = editor.deltaDecorations(decorationsRef.current, newDecorations);
+      } catch {
+        // File might not be in the git repo - ignore
+      }
+    };
+
+    loadGutter();
+  }, [file.path, gitRoot]);
 
   return (
     <div className="monaco-editor-container">
@@ -90,7 +136,7 @@ export default function MonacoEditor({ file, onContentChange, onSave }: Props) {
           padding: { top: 4 },
           renderLineHighlight: "line",
           lineNumbers: "on",
-          glyphMargin: false,
+          glyphMargin: true,
           folding: true,
           bracketPairColorization: { enabled: true },
           autoClosingBrackets: "always",
@@ -103,9 +149,7 @@ export default function MonacoEditor({ file, onContentChange, onSave }: Props) {
           overviewRulerBorder: false,
           hideCursorInOverviewRuler: true,
           overviewRulerLanes: 0,
-          // VS Code-like behavior
           mouseWheelZoom: true,
-          // Performance
           suggest: { showKeywords: true, showSnippets: true },
         }}
         beforeMount={(monaco) => {

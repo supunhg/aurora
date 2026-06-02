@@ -1,4 +1,5 @@
 import type { SidebarView } from "../types";
+import Icon from "./Icon";
 
 interface Props {
   activeView: SidebarView;
@@ -6,12 +7,12 @@ interface Props {
 }
 
 const items: { view: SidebarView; icon: string; label: string }[] = [
-  { view: "explorer", icon: "📁", label: "Explorer" },
-  { view: "search", icon: "🔍", label: "Search" },
-  { view: "source-control", icon: "⎇", label: "Source Control" },
-  { view: "debug", icon: "▶", label: "Run and Debug" },
-  { view: "extensions", icon: "◆", label: "Extensions" },
-  { view: "ai", icon: "✦", label: "AI Chat" },
+  { view: "explorer", icon: "material-symbols:folder-outline", label: "Explorer" },
+  { view: "search", icon: "material-symbols:search", label: "Search" },
+  { view: "source-control", icon: "material-symbols:call-split", label: "Source Control" },
+  { view: "debug", icon: "material-symbols:play-arrow", label: "Run and Debug" },
+  { view: "extensions", icon: "material-symbols:extension", label: "Extensions" },
+  { view: "ai", icon: "material-symbols:auto-awesome", label: "AI Chat" },
 ];
 
 export default function ActivityBar({ activeView, onViewChange }: Props) {
@@ -24,7 +25,7 @@ export default function ActivityBar({ activeView, onViewChange }: Props) {
           onClick={() => onViewChange(item.view)}
           title={item.label}
         >
-          {item.icon}
+          <Icon icon={item.icon} size={20} />
         </button>
       ))}
       <div className="activity-bar-spacer" />

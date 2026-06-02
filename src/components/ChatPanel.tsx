@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import type { ChatMessage } from "../types";
+import Icon from "./Icon";
 
 interface Props {
   messages: ChatMessage[];
@@ -35,12 +36,15 @@ export default function ChatPanel({ messages, isThinking, onSend, onClose }: Pro
     <div className="chat-panel">
       {/* Header */}
       <div className="chat-header">
-        <span className="chat-header-title">✦ Chat</span>
+        <span className="chat-header-title">
+          <Icon icon="material-symbols:auto-awesome" size={14} style={{ marginRight: 4, verticalAlign: "middle" }} />
+          Chat
+        </span>
         <button className="chat-header-btn" onClick={() => setInput("")} title="Clear chat">
-          🗑
+          <Icon icon="material-symbols:delete-outline" size={14} />
         </button>
         <button className="chat-header-btn" onClick={onClose} title="Close panel">
-          ×
+          <Icon icon="material-symbols:close" size={14} />
         </button>
       </div>
 
@@ -67,7 +71,10 @@ export default function ChatPanel({ messages, isThinking, onSend, onClose }: Pro
           </div>
         ))}
         {isThinking && (
-          <div className="chat-thinking">⟳ Thinking...</div>
+          <div className="chat-thinking">
+            <Icon icon="material-symbols:progress-activity" size={12} style={{ marginRight: 4, verticalAlign: "middle" }} />
+            Thinking...
+          </div>
         )}
         <div ref={messagesEndRef} />
       </div>
@@ -89,7 +96,7 @@ export default function ChatPanel({ messages, isThinking, onSend, onClose }: Pro
             onClick={handleSend}
             title="Send"
           >
-            →
+            <Icon icon="material-symbols:arrow-upward" size={18} />
           </button>
         </div>
       </div>

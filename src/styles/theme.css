@@ -1661,6 +1661,49 @@ html, body, #root {
   font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
 }
 
+.search-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 2px 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Git Gutter Decorations (Monaco Editor)
+   --------------------------------------------------------------------------- */
+
+.git-gutter-modified {
+  background: var(--accent-yellow);
+  width: 4px !important;
+  height: 100% !important;
+  margin-left: 2px;
+  border-radius: 2px;
+  opacity: 0.7;
+}
+
+.git-gutter-added {
+  background: var(--accent-green);
+  width: 4px !important;
+  height: 100% !important;
+  margin-left: 2px;
+  border-radius: 2px;
+  opacity: 0.7;
+}
+
+.git-gutter-deleted {
+  background: var(--accent-red);
+  width: 4px !important;
+  height: 100% !important;
+  margin-left: 2px;
+  border-radius: 2px;
+  opacity: 0.7;
+}
+
+/* Gutter margin background for the glyph margin area */
+.monaco-editor .glyph-margin {
+  background: var(--gutter-bg);
+}
+
 /* Result text highlight match */
 .search-result-text mark {
   background: rgba(137, 180, 250, 0.3);

@@ -10,6 +10,13 @@ import StatusBar from "./components/StatusBar";
 import ChatPanel from "./components/ChatPanel";
 import "./App.css";
 
+// Extend Window to track watcher state (simple approach)
+declare global {
+  interface Window {
+    __watcherActive?: boolean;
+  }
+}
+
 export default function App() {
   const [activeSidebar, setActiveSidebar] = useState<SidebarView>("explorer");
   const [showSidebar, setShowSidebar] = useState(true);
@@ -21,6 +28,8 @@ export default function App() {
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [gitBranch, setGitBranch] = useState("main");
   const [workspacePath, setWorkspacePath] = useState("");
+  const [gitRoot, setGitRoot] = useState("");
+  const [watcherActive, setWatcherActive] = useState(false);
   // Debounced trigger for git status auto-refresh on file edits
   const [gitRefreshTrigger, setGitRefreshTrigger] = useState(0);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -68,9 +77,18 @@ export default function App() {
       try {
         const cwd = await invoke<string>("get_current_dir");
         setWorkspacePath(cwd);
+        // Get git root
+        try {
+          const root = await invoke<string>("get_git_root", { path: cwd });
+          setGitRoot(root);
+        } catch {
+          // Not a git repo
+        }
         // Start file watcher
         try {
           await invoke("start_file_watcher", { path: cwd });
+          setWatcherActive(true);
+          window.__watcherActive = true;
         } catch (e) {
           console.error("Failed to start file watcher:", e);
         }
@@ -254,6 +272,7 @@ export default function App() {
             {activeFile ? (
               <Editor
                 file={activeFile}
+                gitRoot={gitRoot}
                 onContentChange={(content) => {
                   setOpenFiles((prev) =>
                     prev.map((f) =>
@@ -291,6 +310,8 @@ export default function App() {
             gitBranch={gitBranch}
             isAiThinking={isAiThinking}
             aiStatus={isAiThinking ? "Thinking..." : "AI Ready"}
+            watcherActive={watcherActive}
+            workspacePath={workspacePath}
           />
         </div>
 

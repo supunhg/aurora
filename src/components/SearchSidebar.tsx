@@ -1,7 +1,8 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { SearchResult } from "../types";
-import { fileIcon, fileIconColor } from "../utils/icons";
+import { fileIconColor } from "../utils/icons";
+import Icon from "./Icon";
 
 interface Props {
   workspacePath: string;
@@ -19,6 +20,7 @@ export default function SearchSidebar({
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Group results by file path
   const groupedResults: Map<string, SearchResult[]> = new Map();
@@ -28,15 +30,15 @@ export default function SearchSidebar({
     groupedResults.set(r.path, existing);
   }
 
-  const handleSearch = useCallback(async () => {
-    if (!query.trim() || !workspacePath) return;
+  const handleSearch = useCallback(async (searchQuery: string) => {
+    if (!searchQuery.trim() || !workspacePath) return;
     setSearching(true);
     setSearched(true);
     try {
       const root = await invoke<string>("get_git_root", { path: workspacePath });
       const searchResults = await invoke<SearchResult[]>("search_files", {
         path: root,
-        query: query.trim(),
+        query: searchQuery.trim(),
         maxResults: 200,
       });
       setResults(searchResults);
@@ -45,11 +47,30 @@ export default function SearchSidebar({
       setResults([]);
     }
     setSearching(false);
-  }, [query, workspacePath]);
+  }, [workspacePath]);
+
+  // Debounced auto-search: fires 300ms after user stops typing
+  useEffect(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+    if (query.trim().length >= 2) {
+      debounceRef.current = setTimeout(() => {
+        handleSearch(query);
+      }, 300);
+    } else {
+      setResults([]);
+      setSearched(false);
+    }
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [query, handleSearch]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
-      handleSearch();
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      handleSearch(query);
     }
     if (e.key === "Escape") {
       setQuery("");
@@ -78,14 +99,16 @@ export default function SearchSidebar({
       <div className="sidebar-header">
         <span className="sidebar-header-title">Search</span>
         <button className="sidebar-header-btn" onClick={() => onClose(false)} title="Collapse sidebar">
-          −
+          <Icon icon="material-symbols:close" size={14} />
         </button>
       </div>
 
       {/* Search input */}
       <div className="search-input-area">
         <div className="search-input-wrapper">
-          <span className="search-input-icon">🔍</span>
+          <span className="search-input-icon">
+            <Icon icon="material-symbols:search" size={14} />
+          </span>
           <input
             className="search-input"
             type="text"
@@ -104,17 +127,13 @@ export default function SearchSidebar({
                 setSearched(false);
               }}
             >
-              ×
+              <Icon icon="material-symbols:close" size={14} />
             </button>
           )}
         </div>
-        <button
-          className="search-btn"
-          onClick={handleSearch}
-          disabled={!query.trim() || searching}
-        >
-          {searching ? "Searching..." : "Search"}
-        </button>
+        {searching && (
+          <div className="search-hint">Searching...</div>
+        )}
       </div>
 
       {/* Results summary */}
@@ -128,25 +147,23 @@ export default function SearchSidebar({
 
       {/* Results */}
       <div className="sidebar-content search-results-list">
-        {searching && (
+        {!searched && !searching && query.length === 0 && (
           <div className="search-placeholder">
-            <div className="search-placeholder-text">Searching...</div>
-          </div>
-        )}
-
-        {!searching && !searched && (
-          <div className="search-placeholder">
-            <div className="search-placeholder-icon">🔍</div>
+            <div className="search-placeholder-icon">
+              <Icon icon="material-symbols:search" size={28} />
+            </div>
             <div className="search-placeholder-text">Search across files</div>
             <div className="search-placeholder-detail">
-              Enter a search term and press Enter
+              Start typing to search — results update automatically
             </div>
           </div>
         )}
 
-        {!searching && searched && totalMatches === 0 && (
+        {searched && totalMatches === 0 && !searching && (
           <div className="search-placeholder">
-            <div className="search-placeholder-icon">✕</div>
+            <div className="search-placeholder-icon">
+              <Icon icon="material-symbols:search-off" size={28} />
+            </div>
             <div className="search-placeholder-text">No results found</div>
           </div>
         )}
@@ -166,9 +183,9 @@ export default function SearchSidebar({
                     </span>
                     <span
                       className="search-file-icon"
-                      style={{ color: fileIconColor(filePath) }}
+                      style={{ color: fileIconColor(filePath), display: "flex", alignItems: "center" }}
                     >
-                      {fileIcon(filePath)}
+                      <Icon icon="material-symbols:description" size={14} />
                     </span>
                     <span className="search-file-path">
                       {filePath.split("/").pop() || filePath}

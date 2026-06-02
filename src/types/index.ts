@@ -56,3 +56,9 @@ export interface FileWatchEvent {
   kind: "created" | "modified" | "deleted";
   path: string;
 }
+
+export interface GutterDecoration {
+  line_number: number;
+  kind: "modified" | "added" | "deleted";
+}
+

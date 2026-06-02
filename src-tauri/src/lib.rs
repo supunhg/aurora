@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Command;
 use std::sync::mpsc;
-use tauri::{Emitter, Manager, State};
+use tauri::{Emitter, State};
 
 // ---------------------------------------------------------------------------
 // Shared application state
@@ -72,6 +72,12 @@ pub struct SearchResult {
 pub struct FileWatchEvent {
     pub kind: String, // "created", "modified", "deleted"
     pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GutterDecoration {
+    pub line_number: u32, // 1-based line number in current file
+    pub kind: String,     // "modified", "added", "deleted"
 }
 
 // ---------------------------------------------------------------------------
@@ -463,17 +469,32 @@ fn git_stash_drop(path: String, index: usize) -> Result<(), String> {
 // Search Command
 // ---------------------------------------------------------------------------
 
-/// Search files in the workspace using git grep (no external deps needed).
+/// Search files in the workspace.
+/// Tracks git grep first; falls back to grep -rI for untracked files.
 #[tauri::command]
 fn search_files(path: String, query: String, max_results: Option<usize>) -> Result<Vec<SearchResult>, String> {
     let max = max_results.unwrap_or(100);
+
+    // 1. Try git grep (only searches tracked files, but fast and respects .gitignore)
+    let mut results = search_with_git_grep(&path, &query, max)?;
+
+    // 2. If git grep returned nothing, try grep -rI for untracked files
+    if results.is_empty() && query.len() >= 2 {
+        if let Ok(grep_results) = search_with_grep(&path, &query, max) {
+            results = grep_results;
+        }
+    }
+
+    Ok(results)
+}
+
+fn search_with_git_grep(path: &str, query: &str, max: usize) -> Result<Vec<SearchResult>, String> {
     let output = Command::new("git")
-        .args(["-C", &path, "grep", "-n", "--column", "-I", "--max-count", &max.to_string(), &query])
+        .args(["-C", path, "grep", "-n", "-I", "--max-count", &max.to_string(), query])
         .output()
         .map_err(|e| format!("Failed to search: {}", e))?;
 
     if !output.status.success() {
-        // git grep exits with 1 if no matches found, which is not an error
         return Ok(Vec::new());
     }
 
@@ -481,38 +502,66 @@ fn search_files(path: String, query: String, max_results: Option<usize>) -> Resu
     let mut results = Vec::new();
 
     for line in stdout.lines() {
-        // Format: filepath:line:column:text
-        if let Some(rest) = line.strip_prefix(&path) {
-            // Strip the absolute path prefix
-            let relative = rest.trim_start_matches('/');
-            if let Some(colon_pos) = relative.find(':') {
-                let file_path = &relative[..colon_pos];
-                let rest2 = &relative[colon_pos + 1..];
-                if let Some(second_colon) = rest2.find(':') {
-                    let line_num = rest2[..second_colon].parse::<usize>().unwrap_or(0);
-                    // Skip the column number
-                    let rest3 = &rest2[second_colon + 1..];
-                    if let Some(third_colon) = rest3.find(':') {
-                        let text = rest3[third_colon + 1..].to_string();
-                        results.push(SearchResult {
-                            path: file_path.to_string(),
-                            line: line_num,
-                            text,
-                        });
-                    }
-                }
+        // Format: path:line:content (without --column flag for simplicity)
+        let parts: Vec<&str> = line.splitn(3, ':').collect();
+        if parts.len() >= 3 {
+            if let Ok(line_num) = parts[1].parse::<usize>() {
+                let file_path = if parts[0].starts_with('/') || parts[0].contains('/') {
+                    parts[0].to_string()
+                } else {
+                    parts[0].to_string()
+                };
+                results.push(SearchResult {
+                    path: file_path,
+                    line: line_num,
+                    text: parts[2].to_string(),
+                });
             }
-        } else {
-            // Try parsing without path prefix
-            let parts: Vec<&str> = line.splitn(3, ':').collect();
-            if parts.len() >= 3 {
-                if let Ok(line_num) = parts[1].parse::<usize>() {
-                    results.push(SearchResult {
-                        path: parts[0].to_string(),
-                        line: line_num,
-                        text: parts[2].to_string(),
-                    });
-                }
+        }
+    }
+
+    Ok(results)
+}
+
+fn search_with_grep(path: &str, query: &str, max: usize) -> Result<Vec<SearchResult>, String> {
+    let output = Command::new("grep")
+        .args([
+            "-rnI",
+            "--exclude-dir=.git",
+            "--exclude-dir=node_modules",
+            "--exclude-dir=target",
+            "--max-count",
+            &max.to_string(),
+            query,
+            path,
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run grep: {}", e))?;
+
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut results = Vec::new();
+
+    for line in stdout.lines() {
+        // Format: path:line:content
+        let parts: Vec<&str> = line.splitn(3, ':').collect();
+        if parts.len() >= 3 {
+            if let Ok(line_num) = parts[1].parse::<usize>() {
+                let file_path = parts[0].to_string();
+                // Strip the absolute search path prefix for relative paths
+                let rel_path = if file_path.starts_with(path) {
+                    file_path[path.len()..].trim_start_matches('/').to_string()
+                } else {
+                    file_path
+                };
+                results.push(SearchResult {
+                    path: rel_path,
+                    line: line_num,
+                    text: parts[2].to_string(),
+                });
             }
         }
     }
@@ -648,6 +697,80 @@ fn run_git_command_raw(args: &[&str]) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
+// Git Gutter Decorations
+// ---------------------------------------------------------------------------
+
+/// Get per-line gutter decoration info for a specific file.
+/// Parses `git diff` to find modified/added/deleted lines.
+#[tauri::command]
+fn git_file_gutter(path: String, file_path: String) -> Result<Vec<GutterDecoration>, String> {
+    let mut decorations = Vec::new();
+
+    // Parse unstaged diff
+    let output = Command::new("git")
+        .args(["-C", &path, "diff", "--unified=0", "--", &file_path])
+        .output()
+        .map_err(|e| format!("Failed to run git: {}", e))?;
+
+    if output.status.success() {
+        let diff = String::from_utf8_lossy(&output.stdout);
+        decorations.extend(parse_diff_gutter(&diff));
+    }
+
+    // Parse staged diff too
+    let staged_output = Command::new("git")
+        .args(["-C", &path, "diff", "--cached", "--unified=0", "--", &file_path])
+        .output()
+        .map_err(|e| format!("Failed to run git: {}", e))?;
+
+    if staged_output.status.success() {
+        let diff = String::from_utf8_lossy(&staged_output.stdout);
+        decorations.extend(parse_diff_gutter(&diff));
+    }
+
+    // Deduplicate: if a line appears in both, the last entry wins (staged > unstaged)
+    decorations.sort_by_key(|d| d.line_number);
+    decorations.dedup_by_key(|d| d.line_number);
+
+    Ok(decorations)
+}
+
+fn parse_diff_gutter(diff: &str) -> Vec<GutterDecoration> {
+    let mut decorations = Vec::new();
+    let mut new_line: u32 = 0;
+    let mut has_removed_before_add = false;
+
+    for line in diff.lines() {
+        if let Some(hunk) = line.strip_prefix("@@ ") {
+            // Parse @@ -old_start,old_count +new_start,new_count @@
+            let parts: Vec<&str> = hunk.split_whitespace().collect();
+            if let Some(new_part) = parts.get(1) {
+                if let Some(start) = new_part.strip_prefix('+') {
+                    new_line = start.split(',').next()
+                        .and_then(|s| s.parse::<u32>().ok())
+                        .unwrap_or(0);
+                    has_removed_before_add = false;
+                }
+            }
+        } else if line.starts_with('+') && !line.starts_with("+++") && new_line > 0 {
+            // Decide if this is "modified" (had preceding - lines) or "added"
+            let kind = if has_removed_before_add { "modified" } else { "added" };
+            decorations.push(GutterDecoration { line_number: new_line, kind: kind.to_string() });
+            new_line += 1;
+            has_removed_before_add = false;
+        } else if line.starts_with('-') && !line.starts_with("---") && new_line > 0 {
+            decorations.push(GutterDecoration { line_number: new_line, kind: "deleted".to_string() });
+            has_removed_before_add = true;
+        } else if !line.starts_with("---") && !line.starts_with("+++") && !line.starts_with("@@") && new_line > 0 {
+            new_line += 1;
+            has_removed_before_add = false;
+        }
+    }
+
+    decorations
+}
+
+// ---------------------------------------------------------------------------
 // Application entry
 // ---------------------------------------------------------------------------
 
@@ -672,6 +795,7 @@ pub fn run() {
             git_discard_file,
             git_commit,
             git_show_diff,
+            git_file_gutter,
             git_list_branches,
             git_switch_branch,
             git_create_branch,

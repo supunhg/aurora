@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { GitFileStatus, GitCommitInfo, GitBranchInfo, GitStashEntry } from "../types";
 import { fileIcon, fileIconColor } from "../utils/icons";
+import Icon from "./Icon";
 
 interface Props {
   workspacePath: string;
@@ -147,13 +148,13 @@ export default function SourceControlSidebar({
         path: gitRoot,
         message: commitMessage.trim(),
       });
-      setCommitResult(`✓ Committed: ${result.message.substring(0, 50)}`);
+      setCommitResult(`\u2713 Committed: ${result.message.substring(0, 50)}`);
       setCommitMessage("");
       await fetchStatus();
       setSelectedFile(null);
       setDiffContent(null);
     } catch (e) {
-      setCommitResult(`✗ Error: ${e}`);
+      setCommitResult(`\u2717 Error: ${e}`);
     }
     setCommitting(false);
   };
@@ -180,9 +181,8 @@ export default function SourceControlSidebar({
     try {
       await invoke("git_switch_branch", { path: gitRoot, branchName, createNew: false });
       setShowBranchSwitcher(false);
-      // Trigger full refresh
       await fetchStatus();
-      window.location.reload(); // Reload to refresh file tree and workspace state
+      window.location.reload();
     } catch (e) {
       alert(`Failed to switch branch: ${e}`);
     }
@@ -207,7 +207,6 @@ export default function SourceControlSidebar({
     setSwitchingBranch(false);
   };
 
-  // Filter branches by search
   const filteredBranches = branchSearch
     ? branches.filter((b) => b.name.toLowerCase().includes(branchSearch.toLowerCase()))
     : branches;
@@ -253,7 +252,7 @@ export default function SourceControlSidebar({
   const handleStashPop = async (index?: number) => {
     if (!gitRoot) return;
     const confirmed = index !== undefined
-      ? window.confirm(`Pop and apply stash@${index}?`)
+      ? window.confirm(`Pop and apply stash@{${index}}?`)
       : window.confirm("Pop and apply the latest stash?");
     if (!confirmed) return;
     try {
@@ -327,21 +326,21 @@ export default function SourceControlSidebar({
           onClick={handleRefresh}
           title="Refresh"
         >
-          ⟳
+          <Icon icon="material-symbols:refresh" size={14} />
         </button>
         <button className="sidebar-header-btn" onClick={() => onClose(false)} title="Collapse sidebar">
-          −
+          <Icon icon="material-symbols:close" size={14} />
         </button>
       </div>
 
       <div className="sc-branch-bar">
-        <span className="sc-branch-icon">⎇</span>
+        <Icon icon="material-symbols:call-split" size={13} style={{ color: "var(--text-muted)" }} />
         <span
           className="sc-branch-name sc-branch-clickable"
           onClick={openBranchSwitcher}
           title="Switch branch"
         >
-          {gitBranch} ▼
+          {gitBranch}
         </span>
         <span className="sc-branch-actions">
           <button
@@ -349,14 +348,14 @@ export default function SourceControlSidebar({
             onClick={openBranchSwitcher}
             title="Switch Branch"
           >
-            ⎇
+            <Icon icon="material-symbols:call-split" size={12} />
           </button>
           <button
             className="sc-header-action-btn"
             onClick={openStashPanel}
             title="Stash"
           >
-            ☰
+            <Icon icon="material-symbols:content-save" size={12} />
           </button>
         </span>
       </div>
@@ -387,12 +386,13 @@ export default function SourceControlSidebar({
             </button>
             {unstagedChanges.length + untrackedFiles.length > 0 && (
               <button className="sc-btn sc-btn-stage-all" onClick={handleStageAll} title="Stage All Changes">
-                + All
+                <Icon icon="material-symbols:add" size={12} style={{ marginRight: 2 }} />
+                All
               </button>
             )}
           </div>
           {commitResult && (
-            <div className={`sc-commit-result ${commitResult.startsWith("✓") ? "success" : "error"}`}>
+            <div className={`sc-commit-result ${commitResult.startsWith("\u2713") ? "success" : "error"}`}>
               {commitResult}
             </div>
           )}
@@ -404,11 +404,8 @@ export default function SourceControlSidebar({
         <div className="sc-branch-panel">
           <div className="sc-branch-panel-header">
             <span className="sc-branch-panel-title">Switch Branch</span>
-            <button
-              className="sc-diff-close"
-              onClick={() => setShowBranchSwitcher(false)}
-            >
-              ×
+            <button className="sc-diff-close" onClick={() => setShowBranchSwitcher(false)}>
+              <Icon icon="material-symbols:close" size={14} />
             </button>
           </div>
           <input
@@ -420,9 +417,7 @@ export default function SourceControlSidebar({
             autoFocus
             onKeyDown={(e) => {
               if (e.key === "Enter" && branchSearch.trim()) {
-                const exact = branches.find(
-                  (b) => b.name === branchSearch.trim()
-                );
+                const exact = branches.find((b) => b.name === branchSearch.trim());
                 if (exact) {
                   handleSwitchBranch(exact.name);
                 } else {
@@ -435,9 +430,7 @@ export default function SourceControlSidebar({
             }}
           />
           <div className="sc-branch-list">
-            {branchesLoading && (
-              <div className="sc-empty-text">Loading branches...</div>
-            )}
+            {branchesLoading && <div className="sc-empty-text">Loading branches...</div>}
             {filteredBranches.map((branch) => (
               <div
                 key={branch.name}
@@ -445,7 +438,11 @@ export default function SourceControlSidebar({
                 onClick={() => !branch.current && handleSwitchBranch(branch.name)}
               >
                 <span className="sc-branch-item-icon">
-                  {branch.current ? "✓" : "⎇"}
+                  {branch.current ? (
+                    <Icon icon="material-symbols:check" size={12} />
+                  ) : (
+                    <Icon icon="material-symbols:call-split" size={12} />
+                  )}
                 </span>
                 <span className="sc-branch-item-name">{branch.name}</span>
                 {branch.upstream && (
@@ -454,19 +451,14 @@ export default function SourceControlSidebar({
               </div>
             ))}
             {branchSearch.trim() && !filteredBranches.find((b) => b.name === branchSearch.trim()) && (
-              <div
-                className="sc-branch-item create"
-                onClick={handleCreateBranch}
-              >
-                <span className="sc-branch-item-icon">+</span>
-                <span className="sc-branch-item-name">
-                  Create branch "{branchSearch.trim()}"
+              <div className="sc-branch-item create" onClick={handleCreateBranch}>
+                <span className="sc-branch-item-icon">
+                  <Icon icon="material-symbols:add" size={12} />
                 </span>
+                <span className="sc-branch-item-name">Create branch &ldquo;{branchSearch.trim()}&rdquo;</span>
               </div>
             )}
-            {switchingBranch && (
-              <div className="sc-empty-text">Switching branch...</div>
-            )}
+            {switchingBranch && <div className="sc-empty-text">Switching branch...</div>}
           </div>
         </div>
       )}
@@ -476,18 +468,10 @@ export default function SourceControlSidebar({
         <div className="sc-branch-panel">
           <div className="sc-branch-panel-header">
             <span className="sc-branch-panel-title">Stashes</span>
-            <button
-              className="sc-diff-close"
-              onClick={() => {
-                setShowStashPanel(false);
-                refreshStashList();
-              }}
-            >
-              ×
+            <button className="sc-diff-close" onClick={() => { setShowStashPanel(false); refreshStashList(); }}>
+              <Icon icon="material-symbols:close" size={14} />
             </button>
           </div>
-
-          {/* Stash push */}
           <div className="sc-stash-push-area">
             <input
               className="sc-branch-search"
@@ -496,9 +480,7 @@ export default function SourceControlSidebar({
               value={stashMessage}
               onChange={(e) => setStashMessage(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  handleStashPush();
-                }
+                if (e.key === "Enter") handleStashPush();
               }}
             />
             <button
@@ -510,37 +492,25 @@ export default function SourceControlSidebar({
               {stashing ? "Stashing..." : "Stash Changes"}
             </button>
           </div>
-
-          {/* Stash list */}
           <div className="sc-branch-list">
-            {stashesLoading && (
-              <div className="sc-empty-text">Loading stashes...</div>
-            )}
+            {stashesLoading && <div className="sc-empty-text">Loading stashes...</div>}
             {!stashesLoading && stashes.length === 0 && (
-              <div className="sc-empty-text" style={{ padding: 16, textAlign: "center" }}>
-                No stashes
-              </div>
+              <div className="sc-empty-text" style={{ padding: 16, textAlign: "center" }}>No stashes</div>
             )}
             {stashes.map((stash) => (
               <div key={stash.index} className="sc-branch-item">
-                <span className="sc-branch-item-icon">☰</span>
+                <span className="sc-branch-item-icon">
+                  <Icon icon="material-symbols:content-save" size={12} />
+                </span>
                 <span className="sc-branch-item-name" style={{ flex: 1 }}>
                   stash@{stash.index}: {stash.message}
                 </span>
                 <div className="sc-file-actions">
-                  <button
-                    className="sc-action-btn"
-                    onClick={() => handleStashPop(stash.index)}
-                    title="Apply and drop"
-                  >
-                    ▲
+                  <button className="sc-action-btn" onClick={() => handleStashPop(stash.index)} title="Apply and drop">
+                    <Icon icon="material-symbols:unfold-more" size={12} />
                   </button>
-                  <button
-                    className="sc-action-btn sc-action-discard"
-                    onClick={() => handleStashDrop(stash.index)}
-                    title="Drop stash"
-                  >
-                    ×
+                  <button className="sc-action-btn sc-action-discard" onClick={() => handleStashDrop(stash.index)} title="Drop stash">
+                    <Icon icon="material-symbols:delete-outline" size={12} />
                   </button>
                 </div>
               </div>
@@ -549,12 +519,14 @@ export default function SourceControlSidebar({
         </div>
       )}
 
-      {/* Main content: file list + diff */}
+      {/* Main content */}
       {!showBranchSwitcher && !showStashPanel && (
         <div className="sidebar-content sc-content">
           {error && (
             <div className="sc-empty">
-              <div className="sc-empty-icon">⎇</div>
+              <div className="sc-empty-icon">
+                <Icon icon="material-symbols:call-split" size={28} />
+              </div>
               <div className="sc-empty-text">No git repository</div>
               <div className="sc-empty-detail">Open a folder with a git repo to see changes</div>
             </div>
@@ -568,7 +540,9 @@ export default function SourceControlSidebar({
 
           {!error && !loading && !hasChanges && (
             <div className="sc-empty">
-              <div className="sc-empty-icon">✓</div>
+              <div className="sc-empty-icon">
+                <Icon icon="material-symbols:check-circle" size={28} />
+              </div>
               <div className="sc-empty-text">No changes</div>
               <div className="sc-empty-detail">Working tree is clean</div>
             </div>
@@ -579,7 +553,7 @@ export default function SourceControlSidebar({
               {stagedChanges.length > 0 && (
                 <div className="sc-section">
                   <div className="sc-section-header" onClick={() => setShowStaged(!showStaged)}>
-                    <span className="sc-section-arrow">{showStaged ? "▼" : "▶"}</span>
+                    <span className="sc-section-arrow">{showStaged ? "\u25BC" : "\u25B6"}</span>
                     <span className="sc-section-title">Staged Changes</span>
                     <span className="sc-section-count">{stagedChanges.length}</span>
                   </div>
@@ -588,24 +562,15 @@ export default function SourceControlSidebar({
                       {stagedChanges.map((file) => {
                         const badge = statusBadge(file.status);
                         return (
-                          <div
-                            key={`staged-${file.path}`}
-                            className={`sc-file-item ${selectedFile === file.path ? "selected" : ""}`}
-                          >
+                          <div key={`staged-${file.path}`} className={`sc-file-item ${selectedFile === file.path ? "selected" : ""}`}>
                             <div className="sc-file-main" onClick={() => handleShowDiff(file.path, true)}>
                               <span className={`sc-badge ${badge.cls}`}>{badge.label}</span>
-                              <span className="sc-file-icon" style={{ color: fileIconColor(file.path) }}>
-                                {fileIcon(file.path)}
-                              </span>
+                              <span className="sc-file-icon" style={{ color: fileIconColor(file.path) }}>{fileIcon(file.path)}</span>
                               <span className="sc-file-name">{file.path}</span>
                             </div>
                             <div className="sc-file-actions">
-                              <button
-                                className="sc-action-btn"
-                                onClick={() => handleUnstageFile(file.path)}
-                                title="Unstage"
-                              >
-                                −
+                              <button className="sc-action-btn" onClick={() => handleUnstageFile(file.path)} title="Unstage">
+                                <Icon icon="material-symbols:remove" size={12} />
                               </button>
                             </div>
                           </div>
@@ -619,7 +584,7 @@ export default function SourceControlSidebar({
               {unstagedChanges.length > 0 && (
                 <div className="sc-section">
                   <div className="sc-section-header" onClick={() => setShowUnstaged(!showUnstaged)}>
-                    <span className="sc-section-arrow">{showUnstaged ? "▼" : "▶"}</span>
+                    <span className="sc-section-arrow">{showUnstaged ? "\u25BC" : "\u25B6"}</span>
                     <span className="sc-section-title">Changes</span>
                     <span className="sc-section-count">{unstagedChanges.length}</span>
                   </div>
@@ -628,20 +593,19 @@ export default function SourceControlSidebar({
                       {unstagedChanges.map((file) => {
                         const badge = statusBadge(file.status);
                         return (
-                          <div
-                            key={`unstaged-${file.path}`}
-                            className={`sc-file-item ${selectedFile === file.path ? "selected" : ""}`}
-                          >
+                          <div key={`unstaged-${file.path}`} className={`sc-file-item ${selectedFile === file.path ? "selected" : ""}`}>
                             <div className="sc-file-main" onClick={() => handleShowDiff(file.path, false)}>
                               <span className={`sc-badge ${badge.cls}`}>{badge.label}</span>
-                              <span className="sc-file-icon" style={{ color: fileIconColor(file.path) }}>
-                                {fileIcon(file.path)}
-                              </span>
+                              <span className="sc-file-icon" style={{ color: fileIconColor(file.path) }}>{fileIcon(file.path)}</span>
                               <span className="sc-file-name">{file.path}</span>
                             </div>
                             <div className="sc-file-actions">
-                              <button className="sc-action-btn" onClick={() => handleStageFile(file.path)} title="Stage">+</button>
-                              <button className="sc-action-btn sc-action-discard" onClick={() => handleDiscardFile(file.path)} title="Discard Changes">↶</button>
+                              <button className="sc-action-btn" onClick={() => handleStageFile(file.path)} title="Stage">
+                                <Icon icon="material-symbols:add" size={12} />
+                              </button>
+                              <button className="sc-action-btn sc-action-discard" onClick={() => handleDiscardFile(file.path)} title="Discard Changes">
+                                <Icon icon="material-symbols:undo" size={12} />
+                              </button>
                             </div>
                           </div>
                         );
@@ -654,26 +618,23 @@ export default function SourceControlSidebar({
               {untrackedFiles.length > 0 && (
                 <div className="sc-section">
                   <div className="sc-section-header" onClick={() => setShowUntracked(!showUntracked)}>
-                    <span className="sc-section-arrow">{showUntracked ? "▼" : "▶"}</span>
+                    <span className="sc-section-arrow">{showUntracked ? "\u25BC" : "\u25B6"}</span>
                     <span className="sc-section-title">Untracked</span>
                     <span className="sc-section-count">{untrackedFiles.length}</span>
                   </div>
                   {showUntracked && (
                     <div className="sc-file-list">
                       {untrackedFiles.map((file) => (
-                        <div
-                          key={`untracked-${file.path}`}
-                          className={`sc-file-item ${selectedFile === file.path ? "selected" : ""}`}
-                        >
+                        <div key={`untracked-${file.path}`} className={`sc-file-item ${selectedFile === file.path ? "selected" : ""}`}>
                           <div className="sc-file-main" onClick={() => handleShowDiff(file.path, false)}>
                             <span className="sc-badge badge-untracked">U</span>
-                            <span className="sc-file-icon" style={{ color: fileIconColor(file.path) }}>
-                              {fileIcon(file.path)}
-                            </span>
+                            <span className="sc-file-icon" style={{ color: fileIconColor(file.path) }}>{fileIcon(file.path)}</span>
                             <span className="sc-file-name">{file.path}</span>
                           </div>
                           <div className="sc-file-actions">
-                            <button className="sc-action-btn" onClick={() => handleStageFile(file.path)} title="Stage">+</button>
+                            <button className="sc-action-btn" onClick={() => handleStageFile(file.path)} title="Stage">
+                              <Icon icon="material-symbols:add" size={12} />
+                            </button>
                           </div>
                         </div>
                       ))}
@@ -686,7 +647,9 @@ export default function SourceControlSidebar({
                 <div className="sc-diff-section">
                   <div className="sc-diff-header">
                     <span className="sc-diff-title">Diff: {selectedFile}</span>
-                    <button className="sc-diff-close" onClick={() => { setSelectedFile(null); setDiffContent(null); }}>×</button>
+                    <button className="sc-diff-close" onClick={() => { setSelectedFile(null); setDiffContent(null); }}>
+                      <Icon icon="material-symbols:close" size={14} />
+                    </button>
                   </div>
                   <div className="sc-diff-content">
                     {diffLoading ? (
