@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { FileEntry, ChatMessage, SidebarView, OpenFile } from "./types";
+import { listen } from "@tauri-apps/api/event";
+import type { FileEntry, ChatMessage, SidebarView, OpenFile, FileWatchEvent } from "./types";
 import { fileIcon } from "./utils/icons";
 import ActivityBar from "./components/ActivityBar";
 import Sidebar from "./components/Sidebar";
@@ -31,12 +32,48 @@ export default function App() {
     };
   }, []);
 
+  // Listen for file watcher events from Tauri backend
+  useEffect(() => {
+    const unlisten = listen<FileWatchEvent>("file-changed", (event) => {
+      const { kind } = event.payload;
+      if (kind === "modified" || kind === "created" || kind === "deleted") {
+        // Re-list the directory and trigger git status refresh
+        // (debounced to avoid rapid re-fetches)
+        if (refreshTimerRef.current) {
+          clearTimeout(refreshTimerRef.current);
+        }
+        refreshTimerRef.current = setTimeout(async () => {
+          try {
+            const entries = await invoke<FileEntry[]>("list_directory", {
+              path: workspacePath,
+              depth: 0,
+            });
+            setFileTree(entries);
+            setGitRefreshTrigger((prev) => prev + 1);
+          } catch {
+            // Ignore errors during watcher refresh
+          }
+        }, 500);
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [workspacePath]);
+
   // Load initial file tree from current directory
   useEffect(() => {
     const init = async () => {
       try {
         const cwd = await invoke<string>("get_current_dir");
         setWorkspacePath(cwd);
+        // Start file watcher
+        try {
+          await invoke("start_file_watcher", { path: cwd });
+        } catch (e) {
+          console.error("Failed to start file watcher:", e);
+        }
         const entries = await invoke<FileEntry[]>("list_directory", {
           path: cwd,
           depth: 0,
@@ -89,6 +126,18 @@ export default function App() {
 
   const handleSwitchFile = useCallback((file: OpenFile) => {
     setActiveFile(file);
+  }, []);
+
+  // Handle Ctrl+S save from Monaco editor
+  const handleSave = useCallback(async (path: string, content: string) => {
+    try {
+      await invoke("write_file", { path, content });
+      setOpenFiles((prev) =>
+        prev.map((f) => (f.path === path ? { ...f, content, modified: false } : f))
+      );
+    } catch (e) {
+      console.error("Failed to save file:", e);
+    }
   }, []);
 
   const handleSendChat = useCallback(async (message: string) => {
@@ -221,6 +270,7 @@ export default function App() {
                     setGitRefreshTrigger((prev) => prev + 1);
                   }, 500);
                 }}
+                onSave={handleSave}
               />
             ) : (
               <div className="welcome-screen">

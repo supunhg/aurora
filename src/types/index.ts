@@ -45,3 +45,14 @@ export interface GitStashEntry {
   index: number;
   message: string;
 }
+
+export interface SearchResult {
+  path: string;
+  line: number;
+  text: string;
+}
+
+export interface FileWatchEvent {
+  kind: "created" | "modified" | "deleted";
+  path: string;
+}

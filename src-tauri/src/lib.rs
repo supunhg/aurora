@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Command;
-use tauri::State;
+use std::sync::mpsc;
+use tauri::{Emitter, Manager, State};
 
 // ---------------------------------------------------------------------------
 // Shared application state
@@ -10,6 +11,8 @@ use tauri::State;
 pub struct AppState {
     pub ai_client: Option<ai::FreeLlmClient>,
 }
+
+
 
 // ---------------------------------------------------------------------------
 // Data types shared with frontend
@@ -56,6 +59,19 @@ pub struct GitBranchInfo {
 pub struct GitStashEntry {
     pub index: usize,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchResult {
+    pub path: String,
+    pub line: usize,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileWatchEvent {
+    pub kind: String, // "created", "modified", "deleted"
+    pub path: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -106,10 +122,12 @@ fn read_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("Failed to read {}: {}", path, e))
 }
 
-/// Write content to a file.
+/// Write content to a file. Returns true if the file was modified.
 #[tauri::command]
-fn write_file(path: String, content: String) -> Result<(), String> {
-    std::fs::write(&path, &content).map_err(|e| format!("Failed to write {}: {}", path, e))
+fn write_file(path: String, content: String) -> Result<bool, String> {
+    let old_content = std::fs::read_to_string(&path).ok();
+    std::fs::write(&path, &content).map_err(|e| format!("Failed to write {}: {}", path, e))?;
+    Ok(old_content.map(|c| c != content).unwrap_or(true))
 }
 
 /// Detect the language ID from a file path.
@@ -325,13 +343,11 @@ fn git_show_diff(path: String, file_path: String, staged: bool) -> Result<String
 // Git Branch Commands
 // ---------------------------------------------------------------------------
 
-/// List all local branches.
 #[tauri::command]
 fn git_list_branches(path: String) -> Result<Vec<GitBranchInfo>, String> {
     let output = Command::new("git")
-        .args([
-            "-c", "color.ui=never", "-C", &path, "branch", "--format=%(refname:short)|%(upstream:short)",
-        ])
+        .args(["-c", "color.ui=never", "-C", &path, "branch",
+               "--format=%(refname:short)|%(upstream:short)"])
         .output()
         .map_err(|e| format!("Failed to run git: {}", e))?;
 
@@ -340,9 +356,7 @@ fn git_list_branches(path: String) -> Result<Vec<GitBranchInfo>, String> {
         return Err(format!("Git branch error: {}", stderr));
     }
 
-    // Get current branch
     let current = get_git_branch(path.clone());
-
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut branches = Vec::new();
 
@@ -353,17 +367,12 @@ fn git_list_branches(path: String) -> Result<Vec<GitBranchInfo>, String> {
         let parts: Vec<&str> = line.splitn(2, '|').collect();
         let name = parts[0].trim().to_string();
         let upstream = parts.get(1).filter(|s| !s.is_empty()).map(|s| s.to_string());
-        branches.push(GitBranchInfo {
-            name: name.clone(),
-            current: name == current,
-            upstream,
-        });
+        branches.push(GitBranchInfo { name: name.clone(), current: name == current, upstream });
     }
 
     Ok(branches)
 }
 
-/// Switch to a branch (git switch).
 #[tauri::command]
 fn git_switch_branch(path: String, branch_name: String, create_new: bool) -> Result<(), String> {
     let mut args = vec!["-C", &path, "switch"];
@@ -374,7 +383,6 @@ fn git_switch_branch(path: String, branch_name: String, create_new: bool) -> Res
     run_git_command_raw(&args)
 }
 
-/// Create and switch to a new branch from a base branch.
 #[tauri::command]
 fn git_create_branch(path: String, branch_name: String, base_branch: Option<String>) -> Result<(), String> {
     let mut args = vec!["-C", &path, "switch", "-c", &branch_name];
@@ -388,7 +396,6 @@ fn git_create_branch(path: String, branch_name: String, base_branch: Option<Stri
 // Git Stash Commands
 // ---------------------------------------------------------------------------
 
-/// Stash changes with an optional message.
 #[tauri::command]
 fn git_stash_push(path: String, message: Option<String>) -> Result<(), String> {
     let mut args = vec!["-C", &path, "stash", "push"];
@@ -399,7 +406,6 @@ fn git_stash_push(path: String, message: Option<String>) -> Result<(), String> {
     run_git_command_raw(&args)
 }
 
-/// List all stashes.
 #[tauri::command]
 fn git_stash_list(path: String) -> Result<Vec<GitStashEntry>, String> {
     let output = Command::new("git")
@@ -408,7 +414,7 @@ fn git_stash_list(path: String) -> Result<Vec<GitStashEntry>, String> {
         .map_err(|e| format!("Failed to run git: {}", e))?;
 
     if !output.status.success() {
-        return Ok(Vec::new()); // No stashes is not an error
+        return Ok(Vec::new());
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -421,39 +427,32 @@ fn git_stash_list(path: String) -> Result<Vec<GitStashEntry>, String> {
         let parts: Vec<&str> = line.splitn(2, '|').collect();
         let ref_str = parts[0].trim().to_string();
         let message = parts.get(1).unwrap_or(&"").trim().to_string();
-        // Extract index from "stash@{N}"
         let index = ref_str
             .strip_prefix("stash@{")
             .and_then(|s| s.strip_suffix('}'))
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(0);
-
         stashes.push(GitStashEntry { index, message });
     }
 
     Ok(stashes)
 }
 
-/// Pop the latest stash (or a specific stash by index).
 #[tauri::command]
 fn git_stash_pop(path: String, index: Option<usize>) -> Result<(), String> {
     let mut args: Vec<String> = vec!["-C".into(), path.clone(), "stash".into(), "pop".into()];
     if let Some(i) = index {
-        args.push(format!("stash@{{{}}}", i));
+        let stash_ref = format!("stash@{{{}}}", i);
+        args.push(stash_ref);
     }
-    // Convert Vec<String> to Vec<&str> for run_git_command_raw
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     run_git_command_raw(&arg_refs)
 }
 
-/// Drop a stash by index.
 #[tauri::command]
 fn git_stash_drop(path: String, index: usize) -> Result<(), String> {
     let args: Vec<String> = vec![
-        "-C".into(),
-        path.into(),
-        "stash".into(),
-        "drop".into(),
+        "-C".into(), path.into(), "stash".into(), "drop".into(),
         format!("stash@{{{}}}", index),
     ];
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
@@ -461,10 +460,119 @@ fn git_stash_drop(path: String, index: usize) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
+// Search Command
+// ---------------------------------------------------------------------------
+
+/// Search files in the workspace using git grep (no external deps needed).
+#[tauri::command]
+fn search_files(path: String, query: String, max_results: Option<usize>) -> Result<Vec<SearchResult>, String> {
+    let max = max_results.unwrap_or(100);
+    let output = Command::new("git")
+        .args(["-C", &path, "grep", "-n", "--column", "-I", "--max-count", &max.to_string(), &query])
+        .output()
+        .map_err(|e| format!("Failed to search: {}", e))?;
+
+    if !output.status.success() {
+        // git grep exits with 1 if no matches found, which is not an error
+        return Ok(Vec::new());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut results = Vec::new();
+
+    for line in stdout.lines() {
+        // Format: filepath:line:column:text
+        if let Some(rest) = line.strip_prefix(&path) {
+            // Strip the absolute path prefix
+            let relative = rest.trim_start_matches('/');
+            if let Some(colon_pos) = relative.find(':') {
+                let file_path = &relative[..colon_pos];
+                let rest2 = &relative[colon_pos + 1..];
+                if let Some(second_colon) = rest2.find(':') {
+                    let line_num = rest2[..second_colon].parse::<usize>().unwrap_or(0);
+                    // Skip the column number
+                    let rest3 = &rest2[second_colon + 1..];
+                    if let Some(third_colon) = rest3.find(':') {
+                        let text = rest3[third_colon + 1..].to_string();
+                        results.push(SearchResult {
+                            path: file_path.to_string(),
+                            line: line_num,
+                            text,
+                        });
+                    }
+                }
+            }
+        } else {
+            // Try parsing without path prefix
+            let parts: Vec<&str> = line.splitn(3, ':').collect();
+            if parts.len() >= 3 {
+                if let Ok(line_num) = parts[1].parse::<usize>() {
+                    results.push(SearchResult {
+                        path: parts[0].to_string(),
+                        line: line_num,
+                        text: parts[2].to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+// ---------------------------------------------------------------------------
+// File Watcher
+// ---------------------------------------------------------------------------
+
+/// Start watching a directory for file changes. Emits "file-changed" events.
+/// Uses raw notify crate; debouncing is done on the frontend (500ms).
+#[tauri::command]
+fn start_file_watcher(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use notify::{EventKind, RecursiveMode, Watcher};
+
+    let app_handle = app.clone();
+    let (tx, rx) = mpsc::channel::<notify::Result<notify::Event>>();
+
+    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        let _ = tx.send(res);
+    })
+    .map_err(|e| format!("Failed to create watcher: {}", e))?;
+
+    watcher
+        .watch(Path::new(&path), RecursiveMode::Recursive)
+        .map_err(|e| format!("Failed to watch path: {}", e))?;
+
+    // Move watcher + rx into a thread to keep them alive for app lifetime
+    std::thread::spawn(move || {
+        let _keep_alive = watcher;
+        while let Ok(Ok(event)) = rx.recv() {
+            let kind = match event.kind {
+                EventKind::Create(_) => "created",
+                EventKind::Modify(_) => "modified",
+                EventKind::Remove(_) => "deleted",
+                _ => continue,
+            };
+            for event_path in &event.paths {
+                // Skip .git directory changes to avoid noise
+                let path_str = event_path.to_string_lossy();
+                if path_str.contains("/.git/") || path_str.ends_with("/.git") {
+                    continue;
+                }
+                let _ = app_handle.emit("file-changed", FileWatchEvent {
+                    kind: kind.to_string(),
+                    path: path_str.to_string(),
+                });
+            }
+        }
+    });
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // AI & Utility Commands
 // ---------------------------------------------------------------------------
 
-/// Send a chat message to the AI backend.
 #[tauri::command]
 async fn chat_completion(
     _state: State<'_, AppState>,
@@ -493,7 +601,6 @@ async fn chat_completion(
         .unwrap_or_else(|| "No response".into()))
 }
 
-/// Get the current working directory.
 #[tauri::command]
 fn get_current_dir() -> String {
     std::env::current_dir()
@@ -501,7 +608,6 @@ fn get_current_dir() -> String {
         .unwrap_or_else(|_| ".".to_string())
 }
 
-/// Check if the AI sidecar is running.
 #[tauri::command]
 async fn check_ai_health() -> bool {
     let client = ai::FreeLlmClient::localhost();
@@ -573,6 +679,8 @@ pub fn run() {
             git_stash_list,
             git_stash_pop,
             git_stash_drop,
+            search_files,
+            start_file_watcher,
             get_current_dir,
             chat_completion,
             check_ai_health,

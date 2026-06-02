@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { FileEntry, SidebarView } from "../types";
 import { fileIcon, fileIconColor } from "../utils/icons";
 import SourceControlSidebar from "./SourceControlSidebar";
+import SearchSidebar from "./SearchSidebar";
 
 interface Props {
   view: SidebarView;
@@ -27,7 +28,13 @@ export default function Sidebar({ view, fileTree, activeFilePath, onOpenFile, on
         />
       );
     case "search":
-      return <PlaceholderSidebar title="SEARCH" icon="🔍" text="Search" />;
+      return (
+        <SearchSidebar
+          workspacePath={workspacePath || ""}
+          onOpenFile={onOpenFile}
+          onClose={onClose}
+        />
+      );
     case "source-control":
       return (
         <SourceControlSidebar

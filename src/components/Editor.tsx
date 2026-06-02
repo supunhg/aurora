@@ -5,6 +5,7 @@ import type { OpenFile } from "../types";
 interface Props {
   file: OpenFile;
   onContentChange: (content: string) => void;
+  onSave?: (path: string, content: string) => void;
 }
 
 const languageMap: Record<string, string> = {
@@ -33,13 +34,26 @@ const languageMap: Record<string, string> = {
   plaintext: "plaintext",
 };
 
-export default function MonacoEditor({ file, onContentChange }: Props) {
+export default function MonacoEditor({ file, onContentChange, onSave }: Props) {
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
 
   const handleEditorDidMount: OnMount = useCallback((editor) => {
     editorRef.current = editor;
+
+    // Register Ctrl+S command
+    editor.addCommand(
+      // KeyMod.CtrlCmd | KeyCode.KeyS
+      2048 | 49, // CtrlCmd + S
+      () => {
+        if (onSave) {
+          const content = editor.getValue();
+          onSave(file.path, content);
+        }
+      }
+    );
+
     editor.focus();
-  }, []);
+  }, [file.path, onSave]);
 
   const handleChange: OnChange = useCallback(
     (value) => {
