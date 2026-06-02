@@ -15,21 +15,25 @@ async fn main() {
         return;
     }
 
-    #[cfg(feature = "gui")]
-    {
-        // Check if a path argument was provided
-        let _path_arg = args.get(1).map(|s| s.as_str());
-        let _status = ui::start_ui();
+    if args.iter().any(|a| a == "--gui" || a == "--app") {
+        // Launch the Tauri desktop application
+        aurora_tauri::run();
         return;
     }
 
-    #[cfg(not(feature = "gui"))]
-    {
-        if let Some(path) = args.get(1) {
-            println!("Aurora: opening {}", path);
-        } else {
-            println!("Aurora scaffold: run with --self-test to exercise the router and UI placeholder, or --editor-test to test the editor core");
-        }
+    // Default: show CLI help
+    if let Some(path) = args.get(1) {
+        println!("Aurora: opening {}", path);
+    } else {
+        println!("Aurora — AI-native code editor");
+        println!();
+        println!("Usage:");
+        println!("  aurora --gui           Launch the desktop application");
+        println!("  aurora --self-test     Run the AI router self-test");
+        println!("  aurora --editor-test   Run the editor core test");
+        println!();
+        println!("The desktop app requires building the Tauri frontend first:");
+        println!("  cd src-tauri && cargo build");
     }
 }
 
@@ -143,9 +147,6 @@ fn run_editor_test() {
 
 async fn run_self_test() {
     println!("[self-test] Starting Aurora self-test...");
-
-    // Start the UI in headless mode
-    let _status = ui::start_ui();
 
     plugin::init_plugin_host();
 

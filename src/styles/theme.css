@@ -1235,3 +1235,155 @@ html, body, #root {
   color: var(--text-muted);
   max-width: 200px;
 }
+
+/* ---------------------------------------------------------------------------
+   Branch Switcher & Stash Panel
+   --------------------------------------------------------------------------- */
+
+.sc-branch-clickable {
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 2px;
+  transition: background var(--transition-fast);
+}
+
+.sc-branch-clickable:hover {
+  background: var(--bg-active);
+}
+
+.sc-branch-actions {
+  display: none;
+  margin-left: auto;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.sc-branch-bar:hover .sc-branch-actions {
+  display: flex;
+}
+
+.sc-header-action-btn {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 2px;
+  font-size: 11px;
+  transition: all var(--transition-fast);
+}
+
+.sc-header-action-btn:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+/* Branch switcher panel */
+.sc-branch-panel {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-section);
+  max-height: 300px;
+}
+
+.sc-branch-panel-header {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
+}
+
+.sc-branch-panel-title {
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex: 1;
+}
+
+.sc-branch-search {
+  width: 100%;
+  background: var(--bg-active);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 6px 8px;
+  outline: none;
+  margin: 6px;
+  width: calc(100% - 12px);
+}
+
+.sc-branch-search:focus {
+  border-color: var(--accent-blue);
+}
+
+.sc-branch-search::placeholder {
+  color: var(--text-muted);
+}
+
+.sc-branch-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.sc-branch-item {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  gap: 6px;
+}
+
+.sc-branch-item:hover {
+  background: var(--tree-hover-bg);
+}
+
+.sc-branch-item.current {
+  background: var(--tree-selected-bg);
+  font-weight: 600;
+}
+
+.sc-branch-item.create {
+  border-top: 1px solid var(--border-section);
+  color: var(--accent-blue);
+}
+
+.sc-branch-item-icon {
+  width: 16px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.sc-branch-item.current .sc-branch-item-icon {
+  color: var(--accent-blue);
+}
+
+.sc-branch-item-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-branch-item-upstream {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* Stash area */
+.sc-stash-push-area {
+  padding: 0;
+  flex-shrink: 0;
+}

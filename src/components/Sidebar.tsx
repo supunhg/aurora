@@ -12,9 +12,10 @@ interface Props {
   onClose: (show: boolean) => void;
   workspacePath?: string;
   gitBranch?: string;
+  gitRefreshTrigger?: number;
 }
 
-export default function Sidebar({ view, fileTree, activeFilePath, onOpenFile, onClose, workspacePath, gitBranch }: Props) {
+export default function Sidebar({ view, fileTree, activeFilePath, onOpenFile, onClose, workspacePath, gitBranch, gitRefreshTrigger }: Props) {
   switch (view) {
     case "explorer":
       return (
@@ -33,6 +34,7 @@ export default function Sidebar({ view, fileTree, activeFilePath, onOpenFile, on
           workspacePath={workspacePath || ""}
           gitBranch={gitBranch || "main"}
           onClose={onClose}
+          onRefreshTrigger={gitRefreshTrigger}
         />
       );
     case "debug":

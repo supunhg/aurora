@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { FileEntry, ChatMessage, SidebarView, OpenFile } from "./types";
 import { fileIcon } from "./utils/icons";
@@ -20,6 +20,16 @@ export default function App() {
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [gitBranch, setGitBranch] = useState("main");
   const [workspacePath, setWorkspacePath] = useState("");
+  // Debounced trigger for git status auto-refresh on file edits
+  const [gitRefreshTrigger, setGitRefreshTrigger] = useState(0);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
+  }, []);
 
   // Load initial file tree from current directory
   useEffect(() => {
@@ -156,6 +166,7 @@ export default function App() {
             onClose={setShowSidebar}
             workspacePath={workspacePath}
             gitBranch={gitBranch}
+            gitRefreshTrigger={gitRefreshTrigger}
           />
         )}
 
@@ -202,6 +213,13 @@ export default function App() {
                         : f
                     )
                   );
+                  // Debounced git status auto-refresh on file edits
+                  if (refreshTimerRef.current) {
+                    clearTimeout(refreshTimerRef.current);
+                  }
+                  refreshTimerRef.current = setTimeout(() => {
+                    setGitRefreshTrigger((prev) => prev + 1);
+                  }, 500);
                 }}
               />
             ) : (

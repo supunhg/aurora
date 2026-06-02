@@ -1,18 +1,20 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { GitFileStatus, GitCommitInfo } from "../types";
+import type { GitFileStatus, GitCommitInfo, GitBranchInfo, GitStashEntry } from "../types";
 import { fileIcon, fileIconColor } from "../utils/icons";
 
 interface Props {
   workspacePath: string;
   gitBranch: string;
   onClose: (show: boolean) => void;
+  onRefreshTrigger?: number;
 }
 
 export default function SourceControlSidebar({
   workspacePath,
   gitBranch,
   onClose,
+  onRefreshTrigger = 0,
 }: Props) {
   const [gitStatus, setGitStatus] = useState<GitFileStatus[]>([]);
   const [loading, setLoading] = useState(false);
@@ -28,6 +30,20 @@ export default function SourceControlSidebar({
   const [showUntracked, setShowUntracked] = useState(true);
   const [gitRoot, setGitRoot] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+
+  // Branch switcher state
+  const [showBranchSwitcher, setShowBranchSwitcher] = useState(false);
+  const [branches, setBranches] = useState<GitBranchInfo[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branchSearch, setBranchSearch] = useState("");
+  const [switchingBranch, setSwitchingBranch] = useState(false);
+
+  // Stash state
+  const [showStashPanel, setShowStashPanel] = useState(false);
+  const [stashes, setStashes] = useState<GitStashEntry[]>([]);
+  const [stashesLoading, setStashesLoading] = useState(false);
+  const [stashMessage, setStashMessage] = useState("");
+  const [stashing, setStashing] = useState(false);
 
   const fetchStatus = useCallback(async () => {
     if (!workspacePath) return;
@@ -45,9 +61,10 @@ export default function SourceControlSidebar({
     setLoading(false);
   }, [workspacePath]);
 
+  // Re-fetch when refresh trigger changes (e.g. file edits in Monaco)
   useEffect(() => {
     fetchStatus();
-  }, [fetchStatus]);
+  }, [fetchStatus, onRefreshTrigger]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -77,10 +94,13 @@ export default function SourceControlSidebar({
 
   const handleDiscardFile = async (filePath: string) => {
     if (!gitRoot) return;
+    const confirmed = window.confirm(
+      `Discard all changes to "${filePath}"?\n\nThis action cannot be undone.`
+    );
+    if (!confirmed) return;
     try {
       await invoke("git_discard_file", { path: gitRoot, filePath });
       await fetchStatus();
-      // Deselect if selected
       if (selectedFile === filePath) {
         setSelectedFile(null);
         setDiffContent(null);
@@ -138,6 +158,125 @@ export default function SourceControlSidebar({
     setCommitting(false);
   };
 
+  // --- Branch Switcher ---
+
+  const openBranchSwitcher = async () => {
+    if (!gitRoot) return;
+    setShowBranchSwitcher(true);
+    setBranchSearch("");
+    setBranchesLoading(true);
+    try {
+      const list = await invoke<GitBranchInfo[]>("git_list_branches", { path: gitRoot });
+      setBranches(list);
+    } catch (e) {
+      console.error("Failed to list branches:", e);
+    }
+    setBranchesLoading(false);
+  };
+
+  const handleSwitchBranch = async (branchName: string) => {
+    if (!gitRoot) return;
+    setSwitchingBranch(true);
+    try {
+      await invoke("git_switch_branch", { path: gitRoot, branchName, createNew: false });
+      setShowBranchSwitcher(false);
+      // Trigger full refresh
+      await fetchStatus();
+      window.location.reload(); // Reload to refresh file tree and workspace state
+    } catch (e) {
+      alert(`Failed to switch branch: ${e}`);
+    }
+    setSwitchingBranch(false);
+  };
+
+  const handleCreateBranch = async () => {
+    if (!branchSearch.trim() || !gitRoot) return;
+    setSwitchingBranch(true);
+    try {
+      await invoke("git_create_branch", {
+        path: gitRoot,
+        branchName: branchSearch.trim(),
+        baseBranch: null,
+      });
+      setShowBranchSwitcher(false);
+      await fetchStatus();
+      window.location.reload();
+    } catch (e) {
+      alert(`Failed to create branch: ${e}`);
+    }
+    setSwitchingBranch(false);
+  };
+
+  // Filter branches by search
+  const filteredBranches = branchSearch
+    ? branches.filter((b) => b.name.toLowerCase().includes(branchSearch.toLowerCase()))
+    : branches;
+
+  // --- Stash Operations ---
+
+  const openStashPanel = async () => {
+    if (!gitRoot) return;
+    setShowStashPanel(true);
+    setStashMessage("");
+    await refreshStashList();
+  };
+
+  const refreshStashList = async () => {
+    if (!gitRoot) return;
+    setStashesLoading(true);
+    try {
+      const list = await invoke<GitStashEntry[]>("git_stash_list", { path: gitRoot });
+      setStashes(list);
+    } catch (e) {
+      console.error("Failed to list stashes:", e);
+    }
+    setStashesLoading(false);
+  };
+
+  const handleStashPush = async () => {
+    if (!gitRoot) return;
+    setStashing(true);
+    try {
+      await invoke("git_stash_push", {
+        path: gitRoot,
+        message: stashMessage.trim() || null,
+      });
+      setStashMessage("");
+      await fetchStatus();
+      await refreshStashList();
+    } catch (e) {
+      alert(`Failed to stash: ${e}`);
+    }
+    setStashing(false);
+  };
+
+  const handleStashPop = async (index?: number) => {
+    if (!gitRoot) return;
+    const confirmed = index !== undefined
+      ? window.confirm(`Pop and apply stash@${index}?`)
+      : window.confirm("Pop and apply the latest stash?");
+    if (!confirmed) return;
+    try {
+      await invoke("git_stash_pop", { path: gitRoot, index: index ?? null });
+      await refreshStashList();
+      await fetchStatus();
+    } catch (e) {
+      alert(`Failed to pop stash: ${e}`);
+    }
+  };
+
+  const handleStashDrop = async (index: number) => {
+    if (!gitRoot) return;
+    const confirmed = window.confirm(`Delete stash@{${index}}?`);
+    if (!confirmed) return;
+    try {
+      await invoke("git_stash_drop", { path: gitRoot, index });
+      await refreshStashList();
+    } catch (e) {
+      alert(`Failed to drop stash: ${e}`);
+    }
+  };
+
   const stagedChanges = gitStatus.filter((f) => f.staged);
   const unstagedChanges = gitStatus.filter((f) => !f.staged && f.status !== "??");
   const untrackedFiles = gitStatus.filter((f) => f.status === "??");
@@ -152,7 +291,6 @@ export default function SourceControlSidebar({
     return { label: first, cls: "badge-default" };
   };
 
-  // Parse diff for syntax highlighting
   const renderDiffLines = (diff: string) => {
     return diff.split("\n").map((line, i) => {
       let cls = "diff-line";
@@ -198,244 +336,371 @@ export default function SourceControlSidebar({
 
       <div className="sc-branch-bar">
         <span className="sc-branch-icon">⎇</span>
-        <span className="sc-branch-name">{gitBranch}</span>
+        <span
+          className="sc-branch-name sc-branch-clickable"
+          onClick={openBranchSwitcher}
+          title="Switch branch"
+        >
+          {gitBranch} ▼
+        </span>
+        <span className="sc-branch-actions">
+          <button
+            className="sc-header-action-btn"
+            onClick={openBranchSwitcher}
+            title="Switch Branch"
+          >
+            ⎇
+          </button>
+          <button
+            className="sc-header-action-btn"
+            onClick={openStashPanel}
+            title="Stash"
+          >
+            ☰
+          </button>
+        </span>
       </div>
 
       {/* Commit area */}
-      <div className="sc-commit-area">
-        <textarea
-          className="sc-commit-input"
-          placeholder="Message (Ctrl+Enter to commit)"
-          value={commitMessage}
-          onChange={(e) => setCommitMessage(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.ctrlKey && e.key === "Enter") {
-              handleCommit();
-            }
-          }}
-          rows={3}
-          disabled={committing}
-        />
-        <div className="sc-commit-actions">
-          <button
-            className="sc-btn sc-btn-commit"
-            disabled={!commitMessage.trim() || committing || stagedChanges.length === 0}
-            onClick={handleCommit}
-          >
-            {committing ? "Committing..." : "Commit"}
-          </button>
-          {unstagedChanges.length + untrackedFiles.length > 0 && (
-            <button className="sc-btn sc-btn-stage-all" onClick={handleStageAll} title="Stage All Changes">
-              + All
+      {!showBranchSwitcher && !showStashPanel && (
+        <div className="sc-commit-area">
+          <textarea
+            className="sc-commit-input"
+            placeholder="Message (Ctrl+Enter to commit)"
+            value={commitMessage}
+            onChange={(e) => setCommitMessage(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.ctrlKey && e.key === "Enter") {
+                handleCommit();
+              }
+            }}
+            rows={3}
+            disabled={committing}
+          />
+          <div className="sc-commit-actions">
+            <button
+              className="sc-btn sc-btn-commit"
+              disabled={!commitMessage.trim() || committing || stagedChanges.length === 0}
+              onClick={handleCommit}
+            >
+              {committing ? "Committing..." : "Commit"}
             </button>
+            {unstagedChanges.length + untrackedFiles.length > 0 && (
+              <button className="sc-btn sc-btn-stage-all" onClick={handleStageAll} title="Stage All Changes">
+                + All
+              </button>
+            )}
+          </div>
+          {commitResult && (
+            <div className={`sc-commit-result ${commitResult.startsWith("✓") ? "success" : "error"}`}>
+              {commitResult}
+            </div>
           )}
         </div>
-        {commitResult && (
-          <div className={`sc-commit-result ${commitResult.startsWith("✓") ? "success" : "error"}`}>
-            {commitResult}
-          </div>
-        )}
-      </div>
+      )}
 
-      <div className="sidebar-content sc-content">
-        {error && (
-          <div className="sc-empty">
-            <div className="sc-empty-icon">⎇</div>
-            <div className="sc-empty-text">No git repository</div>
-            <div className="sc-empty-detail">Open a folder with a git repo to see changes</div>
+      {/* Branch Switcher Panel */}
+      {showBranchSwitcher && (
+        <div className="sc-branch-panel">
+          <div className="sc-branch-panel-header">
+            <span className="sc-branch-panel-title">Switch Branch</span>
+            <button
+              className="sc-diff-close"
+              onClick={() => setShowBranchSwitcher(false)}
+            >
+              ×
+            </button>
           </div>
-        )}
-
-        {!error && loading && (
-          <div className="sc-empty">
-            <div className="sc-empty-text">Loading status...</div>
-          </div>
-        )}
-
-        {!error && !loading && !hasChanges && (
-          <div className="sc-empty">
-            <div className="sc-empty-icon">✓</div>
-            <div className="sc-empty-text">No changes</div>
-            <div className="sc-empty-detail">Working tree is clean</div>
-          </div>
-        )}
-
-        {!error && hasChanges && (
-          <>
-            {/* Staged Changes */}
-            {stagedChanges.length > 0 && (
-              <div className="sc-section">
-                <div
-                  className="sc-section-header"
-                  onClick={() => setShowStaged(!showStaged)}
-                >
-                  <span className="sc-section-arrow">{showStaged ? "▼" : "▶"}</span>
-                  <span className="sc-section-title">Staged Changes</span>
-                  <span className="sc-section-count">{stagedChanges.length}</span>
-                </div>
-                {showStaged && (
-                  <div className="sc-file-list">
-                    {stagedChanges.map((file) => {
-                      const badge = statusBadge(file.status);
-                      return (
-                        <div
-                          key={`staged-${file.path}`}
-                          className={`sc-file-item ${selectedFile === file.path ? "selected" : ""}`}
-                        >
-                          <div
-                            className="sc-file-main"
-                            onClick={() => handleShowDiff(file.path, true)}
-                          >
-                            <span className={`sc-badge ${badge.cls}`}>{badge.label}</span>
-                            <span className="sc-file-icon" style={{ color: fileIconColor(file.path) }}>
-                              {fileIcon(file.path)}
-                            </span>
-                            <span className="sc-file-name">{file.path}</span>
-                          </div>
-                          <div className="sc-file-actions">
-                            <button
-                              className="sc-action-btn"
-                              onClick={() => handleUnstageFile(file.path)}
-                              title="Unstage"
-                            >
-                              −
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+          <input
+            className="sc-branch-search"
+            type="text"
+            placeholder="Search or create branch..."
+            value={branchSearch}
+            onChange={(e) => setBranchSearch(e.target.value)}
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && branchSearch.trim()) {
+                const exact = branches.find(
+                  (b) => b.name === branchSearch.trim()
+                );
+                if (exact) {
+                  handleSwitchBranch(exact.name);
+                } else {
+                  handleCreateBranch();
+                }
+              }
+              if (e.key === "Escape") {
+                setShowBranchSwitcher(false);
+              }
+            }}
+          />
+          <div className="sc-branch-list">
+            {branchesLoading && (
+              <div className="sc-empty-text">Loading branches...</div>
+            )}
+            {filteredBranches.map((branch) => (
+              <div
+                key={branch.name}
+                className={`sc-branch-item ${branch.current ? "current" : ""}`}
+                onClick={() => !branch.current && handleSwitchBranch(branch.name)}
+              >
+                <span className="sc-branch-item-icon">
+                  {branch.current ? "✓" : "⎇"}
+                </span>
+                <span className="sc-branch-item-name">{branch.name}</span>
+                {branch.upstream && (
+                  <span className="sc-branch-item-upstream">{branch.upstream}</span>
                 )}
               </div>
-            )}
-
-            {/* Unstaged Changes */}
-            {unstagedChanges.length > 0 && (
-              <div className="sc-section">
-                <div
-                  className="sc-section-header"
-                  onClick={() => setShowUnstaged(!showUnstaged)}
-                >
-                  <span className="sc-section-arrow">{showUnstaged ? "▼" : "▶"}</span>
-                  <span className="sc-section-title">Changes</span>
-                  <span className="sc-section-count">{unstagedChanges.length}</span>
-                </div>
-                {showUnstaged && (
-                  <div className="sc-file-list">
-                    {unstagedChanges.map((file) => {
-                      const badge = statusBadge(file.status);
-                      return (
-                        <div
-                          key={`unstaged-${file.path}`}
-                          className={`sc-file-item ${selectedFile === file.path ? "selected" : ""}`}
-                        >
-                          <div
-                            className="sc-file-main"
-                            onClick={() => handleShowDiff(file.path, false)}
-                          >
-                            <span className={`sc-badge ${badge.cls}`}>{badge.label}</span>
-                            <span className="sc-file-icon" style={{ color: fileIconColor(file.path) }}>
-                              {fileIcon(file.path)}
-                            </span>
-                            <span className="sc-file-name">{file.path}</span>
-                          </div>
-                          <div className="sc-file-actions">
-                            <button
-                              className="sc-action-btn"
-                              onClick={() => handleStageFile(file.path)}
-                              title="Stage"
-                            >
-                              +
-                            </button>
-                            <button
-                              className="sc-action-btn sc-action-discard"
-                              onClick={() => handleDiscardFile(file.path)}
-                              title="Discard Changes"
-                            >
-                              ↶
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+            ))}
+            {branchSearch.trim() && !filteredBranches.find((b) => b.name === branchSearch.trim()) && (
+              <div
+                className="sc-branch-item create"
+                onClick={handleCreateBranch}
+              >
+                <span className="sc-branch-item-icon">+</span>
+                <span className="sc-branch-item-name">
+                  Create branch "{branchSearch.trim()}"
+                </span>
               </div>
             )}
+            {switchingBranch && (
+              <div className="sc-empty-text">Switching branch...</div>
+            )}
+          </div>
+        </div>
+      )}
 
-            {/* Untracked Files */}
-            {untrackedFiles.length > 0 && (
-              <div className="sc-section">
-                <div
-                  className="sc-section-header"
-                  onClick={() => setShowUntracked(!showUntracked)}
-                >
-                  <span className="sc-section-arrow">{showUntracked ? "▼" : "▶"}</span>
-                  <span className="sc-section-title">Untracked</span>
-                  <span className="sc-section-count">{untrackedFiles.length}</span>
-                </div>
-                {showUntracked && (
-                  <div className="sc-file-list">
-                    {untrackedFiles.map((file) => (
-                      <div
-                        key={`untracked-${file.path}`}
-                        className={`sc-file-item ${selectedFile === file.path ? "selected" : ""}`}
-                      >
-                        <div
-                          className="sc-file-main"
-                          onClick={() => handleShowDiff(file.path, false)}
-                        >
-                          <span className="sc-badge badge-untracked">U</span>
-                          <span className="sc-file-icon" style={{ color: fileIconColor(file.path) }}>
-                            {fileIcon(file.path)}
-                          </span>
-                          <span className="sc-file-name">{file.path}</span>
-                        </div>
-                        <div className="sc-file-actions">
-                          <button
-                            className="sc-action-btn"
-                            onClick={() => handleStageFile(file.path)}
-                            title="Stage"
-                          >
-                            +
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+      {/* Stash Panel */}
+      {showStashPanel && (
+        <div className="sc-branch-panel">
+          <div className="sc-branch-panel-header">
+            <span className="sc-branch-panel-title">Stashes</span>
+            <button
+              className="sc-diff-close"
+              onClick={() => {
+                setShowStashPanel(false);
+                refreshStashList();
+              }}
+            >
+              ×
+            </button>
+          </div>
+
+          {/* Stash push */}
+          <div className="sc-stash-push-area">
+            <input
+              className="sc-branch-search"
+              type="text"
+              placeholder="Stash message (optional)"
+              value={stashMessage}
+              onChange={(e) => setStashMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  handleStashPush();
+                }
+              }}
+            />
+            <button
+              className="sc-btn sc-btn-commit"
+              onClick={handleStashPush}
+              disabled={stashing}
+              style={{ marginTop: 4 }}
+            >
+              {stashing ? "Stashing..." : "Stash Changes"}
+            </button>
+          </div>
+
+          {/* Stash list */}
+          <div className="sc-branch-list">
+            {stashesLoading && (
+              <div className="sc-empty-text">Loading stashes...</div>
+            )}
+            {!stashesLoading && stashes.length === 0 && (
+              <div className="sc-empty-text" style={{ padding: 16, textAlign: "center" }}>
+                No stashes
               </div>
             )}
-
-            {/* Diff Viewer */}
-            {selectedFile && (
-              <div className="sc-diff-section">
-                <div className="sc-diff-header">
-                  <span className="sc-diff-title">Diff: {selectedFile}</span>
+            {stashes.map((stash) => (
+              <div key={stash.index} className="sc-branch-item">
+                <span className="sc-branch-item-icon">☰</span>
+                <span className="sc-branch-item-name" style={{ flex: 1 }}>
+                  stash@{stash.index}: {stash.message}
+                </span>
+                <div className="sc-file-actions">
                   <button
-                    className="sc-diff-close"
-                    onClick={() => {
-                      setSelectedFile(null);
-                      setDiffContent(null);
-                    }}
+                    className="sc-action-btn"
+                    onClick={() => handleStashPop(stash.index)}
+                    title="Apply and drop"
+                  >
+                    ▲
+                  </button>
+                  <button
+                    className="sc-action-btn sc-action-discard"
+                    onClick={() => handleStashDrop(stash.index)}
+                    title="Drop stash"
                   >
                     ×
                   </button>
                 </div>
-                <div className="sc-diff-content">
-                  {diffLoading ? (
-                    <div className="sc-diff-loading">Loading diff...</div>
-                  ) : diffContent ? (
-                    <pre className="sc-diff-pre">
-                      <code>{renderDiffLines(diffContent)}</code>
-                    </pre>
-                  ) : null}
-                </div>
               </div>
-            )}
-          </>
-        )}
-      </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Main content: file list + diff */}
+      {!showBranchSwitcher && !showStashPanel && (
+        <div className="sidebar-content sc-content">
+          {error && (
+            <div className="sc-empty">
+              <div className="sc-empty-icon">⎇</div>
+              <div className="sc-empty-text">No git repository</div>
+              <div className="sc-empty-detail">Open a folder with a git repo to see changes</div>
+            </div>
+          )}
+
+          {!error && loading && (
+            <div className="sc-empty">
+              <div className="sc-empty-text">Loading status...</div>
+            </div>
+          )}
+
+          {!error && !loading && !hasChanges && (
+            <div className="sc-empty">
+              <div className="sc-empty-icon">✓</div>
+              <div className="sc-empty-text">No changes</div>
+              <div className="sc-empty-detail">Working tree is clean</div>
+            </div>
+          )}
+
+          {!error && hasChanges && (
+            <>
+              {stagedChanges.length > 0 && (
+                <div className="sc-section">
+                  <div className="sc-section-header" onClick={() => setShowStaged(!showStaged)}>
+                    <span className="sc-section-arrow">{showStaged ? "▼" : "▶"}</span>
+                    <span className="sc-section-title">Staged Changes</span>
+                    <span className="sc-section-count">{stagedChanges.length}</span>
+                  </div>
+                  {showStaged && (
+                    <div className="sc-file-list">
+                      {stagedChanges.map((file) => {
+                        const badge = statusBadge(file.status);
+                        return (
+                          <div
+                            key={`staged-${file.path}`}
+                            className={`sc-file-item ${selectedFile === file.path ? "selected" : ""}`}
+                          >
+                            <div className="sc-file-main" onClick={() => handleShowDiff(file.path, true)}>
+                              <span className={`sc-badge ${badge.cls}`}>{badge.label}</span>
+                              <span className="sc-file-icon" style={{ color: fileIconColor(file.path) }}>
+                                {fileIcon(file.path)}
+                              </span>
+                              <span className="sc-file-name">{file.path}</span>
+                            </div>
+                            <div className="sc-file-actions">
+                              <button
+                                className="sc-action-btn"
+                                onClick={() => handleUnstageFile(file.path)}
+                                title="Unstage"
+                              >
+                                −
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {unstagedChanges.length > 0 && (
+                <div className="sc-section">
+                  <div className="sc-section-header" onClick={() => setShowUnstaged(!showUnstaged)}>
+                    <span className="sc-section-arrow">{showUnstaged ? "▼" : "▶"}</span>
+                    <span className="sc-section-title">Changes</span>
+                    <span className="sc-section-count">{unstagedChanges.length}</span>
+                  </div>
+                  {showUnstaged && (
+                    <div className="sc-file-list">
+                      {unstagedChanges.map((file) => {
+                        const badge = statusBadge(file.status);
+                        return (
+                          <div
+                            key={`unstaged-${file.path}`}
+                            className={`sc-file-item ${selectedFile === file.path ? "selected" : ""}`}
+                          >
+                            <div className="sc-file-main" onClick={() => handleShowDiff(file.path, false)}>
+                              <span className={`sc-badge ${badge.cls}`}>{badge.label}</span>
+                              <span className="sc-file-icon" style={{ color: fileIconColor(file.path) }}>
+                                {fileIcon(file.path)}
+                              </span>
+                              <span className="sc-file-name">{file.path}</span>
+                            </div>
+                            <div className="sc-file-actions">
+                              <button className="sc-action-btn" onClick={() => handleStageFile(file.path)} title="Stage">+</button>
+                              <button className="sc-action-btn sc-action-discard" onClick={() => handleDiscardFile(file.path)} title="Discard Changes">↶</button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {untrackedFiles.length > 0 && (
+                <div className="sc-section">
+                  <div className="sc-section-header" onClick={() => setShowUntracked(!showUntracked)}>
+                    <span className="sc-section-arrow">{showUntracked ? "▼" : "▶"}</span>
+                    <span className="sc-section-title">Untracked</span>
+                    <span className="sc-section-count">{untrackedFiles.length}</span>
+                  </div>
+                  {showUntracked && (
+                    <div className="sc-file-list">
+                      {untrackedFiles.map((file) => (
+                        <div
+                          key={`untracked-${file.path}`}
+                          className={`sc-file-item ${selectedFile === file.path ? "selected" : ""}`}
+                        >
+                          <div className="sc-file-main" onClick={() => handleShowDiff(file.path, false)}>
+                            <span className="sc-badge badge-untracked">U</span>
+                            <span className="sc-file-icon" style={{ color: fileIconColor(file.path) }}>
+                              {fileIcon(file.path)}
+                            </span>
+                            <span className="sc-file-name">{file.path}</span>
+                          </div>
+                          <div className="sc-file-actions">
+                            <button className="sc-action-btn" onClick={() => handleStageFile(file.path)} title="Stage">+</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {selectedFile && (
+                <div className="sc-diff-section">
+                  <div className="sc-diff-header">
+                    <span className="sc-diff-title">Diff: {selectedFile}</span>
+                    <button className="sc-diff-close" onClick={() => { setSelectedFile(null); setDiffContent(null); }}>×</button>
+                  </div>
+                  <div className="sc-diff-content">
+                    {diffLoading ? (
+                      <div className="sc-diff-loading">Loading diff...</div>
+                    ) : diffContent ? (
+                      <pre className="sc-diff-pre"><code>{renderDiffLines(diffContent)}</code></pre>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

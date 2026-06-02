@@ -6,7 +6,6 @@ members = [
     "config",
     "ai",
     "lsp",
-    "ui",
     "plugin",
     "editor",
 ]

@@ -34,3 +34,14 @@ export interface GitCommitInfo {
   message: string;
   author: string;
 }
+
+export interface GitBranchInfo {
+  name: string;
+  current: boolean;
+  upstream: string | null;
+}
+
+export interface GitStashEntry {
+  index: number;
+  message: string;
+}

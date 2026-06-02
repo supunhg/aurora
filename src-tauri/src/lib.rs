@@ -32,13 +32,9 @@ pub struct ChatMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitFileStatus {
-    /// The file path relative to repo root
     pub path: String,
-    /// Status code, e.g. "M", "A", "D", "R", "??", "MM", etc.
     pub status: String,
-    /// Whether the change is staged
     pub staged: bool,
-    /// For renames, the original path
     pub original_path: Option<String>,
 }
 
@@ -47,6 +43,19 @@ pub struct GitCommitInfo {
     pub hash: String,
     pub message: String,
     pub author: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitBranchInfo {
+    pub name: String,
+    pub current: bool,
+    pub upstream: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitStashEntry {
+    pub index: usize,
+    pub message: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +112,7 @@ fn write_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, &content).map_err(|e| format!("Failed to write {}: {}", path, e))
 }
 
-/// Detect the language ID from a file path (e.g., "rust", "typescript").
+/// Detect the language ID from a file path.
 #[tauri::command]
 fn detect_language(path: String) -> String {
     let p = Path::new(&path);
@@ -135,14 +144,13 @@ fn detect_language(path: String) -> String {
     .to_string()
 }
 
-/// Get the git branch for a given directory.
+/// Get the current git branch name.
 #[tauri::command]
 fn get_git_branch(path: String) -> String {
-    // Try git symbolic-ref first (handles detached HEAD, worktrees, etc.)
     let output = Command::new("git")
         .args(["-C", &path, "rev-parse", "--abbrev-ref", "HEAD"])
         .output();
-    
+
     if let Ok(out) = output {
         if out.status.success() {
             let branch = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -153,7 +161,6 @@ fn get_git_branch(path: String) -> String {
         }
     }
 
-    // Fallback: try to find .git/HEAD manually
     let head_path = Path::new(&path).join(".git").join("HEAD");
     if let Ok(content) = std::fs::read_to_string(head_path) {
         if let Some(ref_line) = content.lines().next() {
@@ -165,7 +172,7 @@ fn get_git_branch(path: String) -> String {
     "main".to_string()
 }
 
-/// Get the git repository root directory.
+/// Get the git repository root.
 #[tauri::command]
 fn get_git_root(path: String) -> Result<String, String> {
     let output = Command::new("git")
@@ -178,12 +185,10 @@ fn get_git_root(path: String) -> Result<String, String> {
         return Err(format!("Not a git repository: {}", stderr));
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .to_string())
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Get git status using `git status --porcelain`.
+/// Get git status.
 #[tauri::command]
 fn git_status(path: String) -> Result<Vec<GitFileStatus>, String> {
     let output = Command::new("git")
@@ -203,12 +208,10 @@ fn git_status(path: String) -> Result<Vec<GitFileStatus>, String> {
         if line.len() < 3 {
             continue;
         }
-        // First two chars are the status, e.g. "M " or " M" or "??" or "MM"
-        let x = line.as_bytes()[0] as char; // index (staged) status
-        let y = line.as_bytes()[1] as char; // worktree status
+        let x = line.as_bytes()[0] as char;
+        let y = line.as_bytes()[1] as char;
         let rest = &line[3..];
 
-        // Handle renames: "R  oldname -> newname"
         let (file_path, original_path) = if x == 'R' || y == 'R' {
             if let Some(arrow_pos) = rest.find(" -> ") {
                 let orig = rest[..arrow_pos].to_string();
@@ -222,7 +225,6 @@ fn git_status(path: String) -> Result<Vec<GitFileStatus>, String> {
         };
 
         let mut status_str = String::new();
-        // Build status string like git: "M", "A", "D", "??", "MM", etc.
         if x != ' ' && x != '?' {
             status_str.push(x);
         }
@@ -230,17 +232,13 @@ fn git_status(path: String) -> Result<Vec<GitFileStatus>, String> {
             status_str.push(y);
         }
         if status_str.is_empty() {
-            // untracked
             status_str = "??".to_string();
         }
-
-        // Staged if the index column has a change
-        let staged = x != ' ';
 
         entries.push(GitFileStatus {
             path: file_path,
             status: status_str,
-            staged,
+            staged: x != ' ',
             original_path,
         });
     }
@@ -248,67 +246,31 @@ fn git_status(path: String) -> Result<Vec<GitFileStatus>, String> {
     Ok(entries)
 }
 
-/// Stage a file (git add).
+/// Stage a file.
 #[tauri::command]
 fn git_stage_file(path: String, file_path: String) -> Result<(), String> {
-    let output = Command::new("git")
-        .args(["-C", &path, "add", "--", &file_path])
-        .output()
-        .map_err(|e| format!("Failed to run git: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Git stage error: {}", stderr));
-    }
-    Ok(())
+    run_git_command(path, &["add", "--", &file_path])
 }
 
 /// Stage all files.
 #[tauri::command]
 fn git_stage_all(path: String) -> Result<(), String> {
-    let output = Command::new("git")
-        .args(["-C", &path, "add", "-A"])
-        .output()
-        .map_err(|e| format!("Failed to run git: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Git stage all error: {}", stderr));
-    }
-    Ok(())
+    run_git_command(path, &["add", "-A"])
 }
 
-/// Unstage a file (git reset HEAD -- file).
+/// Unstage a file.
 #[tauri::command]
 fn git_unstage_file(path: String, file_path: String) -> Result<(), String> {
-    let output = Command::new("git")
-        .args(["-C", &path, "reset", "HEAD", "--", &file_path])
-        .output()
-        .map_err(|e| format!("Failed to run git: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Git unstage error: {}", stderr));
-    }
-    Ok(())
+    run_git_command(path, &["reset", "HEAD", "--", &file_path])
 }
 
-/// Discard changes in a file (git checkout -- file).
+/// Discard changes in a file.
 #[tauri::command]
 fn git_discard_file(path: String, file_path: String) -> Result<(), String> {
-    let output = Command::new("git")
-        .args(["-C", &path, "checkout", "--", &file_path])
-        .output()
-        .map_err(|e| format!("Failed to run git: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Git discard error: {}", stderr));
-    }
-    Ok(())
+    run_git_command(path, &["checkout", "--", &file_path])
 }
 
-/// Create a commit (git commit -m "message").
+/// Create a commit.
 #[tauri::command]
 fn git_commit(path: String, message: String) -> Result<GitCommitInfo, String> {
     let output = Command::new("git")
@@ -321,15 +283,8 @@ fn git_commit(path: String, message: String) -> Result<GitCommitInfo, String> {
         return Err(format!("Git commit error: {}", stderr));
     }
 
-    // Get the last commit hash
     let log_output = Command::new("git")
-        .args([
-            "-C",
-            &path,
-            "log",
-            "-1",
-            "--format=%H%n%s%n%an",
-        ])
+        .args(["-C", &path, "log", "-1", "--format=%H%n%s%n%an"])
         .output()
         .map_err(|e| format!("Failed to get commit info: {}", e))?;
 
@@ -343,9 +298,7 @@ fn git_commit(path: String, message: String) -> Result<GitCommitInfo, String> {
     })
 }
 
-/// Get the diff for a specific file.
-/// If staged is true, shows diff between HEAD and index (staged).
-/// If staged is false, shows diff between index and worktree (unstaged).
+/// Show diff for a file.
 #[tauri::command]
 fn git_show_diff(path: String, file_path: String, staged: bool) -> Result<String, String> {
     let mut args = vec!["-C", &path, "diff"];
@@ -368,7 +321,150 @@ fn git_show_diff(path: String, file_path: String, staged: bool) -> Result<String
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-/// Send a chat message to the AI backend and get a response.
+// ---------------------------------------------------------------------------
+// Git Branch Commands
+// ---------------------------------------------------------------------------
+
+/// List all local branches.
+#[tauri::command]
+fn git_list_branches(path: String) -> Result<Vec<GitBranchInfo>, String> {
+    let output = Command::new("git")
+        .args([
+            "-c", "color.ui=never", "-C", &path, "branch", "--format=%(refname:short)|%(upstream:short)",
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run git: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Git branch error: {}", stderr));
+    }
+
+    // Get current branch
+    let current = get_git_branch(path.clone());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut branches = Vec::new();
+
+    for line in stdout.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = line.splitn(2, '|').collect();
+        let name = parts[0].trim().to_string();
+        let upstream = parts.get(1).filter(|s| !s.is_empty()).map(|s| s.to_string());
+        branches.push(GitBranchInfo {
+            name: name.clone(),
+            current: name == current,
+            upstream,
+        });
+    }
+
+    Ok(branches)
+}
+
+/// Switch to a branch (git switch).
+#[tauri::command]
+fn git_switch_branch(path: String, branch_name: String, create_new: bool) -> Result<(), String> {
+    let mut args = vec!["-C", &path, "switch"];
+    if create_new {
+        args.push("-c");
+    }
+    args.push(&branch_name);
+    run_git_command_raw(&args)
+}
+
+/// Create and switch to a new branch from a base branch.
+#[tauri::command]
+fn git_create_branch(path: String, branch_name: String, base_branch: Option<String>) -> Result<(), String> {
+    let mut args = vec!["-C", &path, "switch", "-c", &branch_name];
+    if let Some(base) = &base_branch {
+        args.push(base);
+    }
+    run_git_command_raw(&args)
+}
+
+// ---------------------------------------------------------------------------
+// Git Stash Commands
+// ---------------------------------------------------------------------------
+
+/// Stash changes with an optional message.
+#[tauri::command]
+fn git_stash_push(path: String, message: Option<String>) -> Result<(), String> {
+    let mut args = vec!["-C", &path, "stash", "push"];
+    if let Some(msg) = &message {
+        args.push("-m");
+        args.push(msg);
+    }
+    run_git_command_raw(&args)
+}
+
+/// List all stashes.
+#[tauri::command]
+fn git_stash_list(path: String) -> Result<Vec<GitStashEntry>, String> {
+    let output = Command::new("git")
+        .args(["-C", &path, "stash", "list", "--format=%gd|%s"])
+        .output()
+        .map_err(|e| format!("Failed to run git: {}", e))?;
+
+    if !output.status.success() {
+        return Ok(Vec::new()); // No stashes is not an error
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut stashes = Vec::new();
+
+    for line in stdout.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = line.splitn(2, '|').collect();
+        let ref_str = parts[0].trim().to_string();
+        let message = parts.get(1).unwrap_or(&"").trim().to_string();
+        // Extract index from "stash@{N}"
+        let index = ref_str
+            .strip_prefix("stash@{")
+            .and_then(|s| s.strip_suffix('}'))
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0);
+
+        stashes.push(GitStashEntry { index, message });
+    }
+
+    Ok(stashes)
+}
+
+/// Pop the latest stash (or a specific stash by index).
+#[tauri::command]
+fn git_stash_pop(path: String, index: Option<usize>) -> Result<(), String> {
+    let mut args: Vec<String> = vec!["-C".into(), path.clone(), "stash".into(), "pop".into()];
+    if let Some(i) = index {
+        args.push(format!("stash@{{{}}}", i));
+    }
+    // Convert Vec<String> to Vec<&str> for run_git_command_raw
+    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    run_git_command_raw(&arg_refs)
+}
+
+/// Drop a stash by index.
+#[tauri::command]
+fn git_stash_drop(path: String, index: usize) -> Result<(), String> {
+    let args: Vec<String> = vec![
+        "-C".into(),
+        path.into(),
+        "stash".into(),
+        "drop".into(),
+        format!("stash@{{{}}}", index),
+    ];
+    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    run_git_command_raw(&arg_refs)
+}
+
+// ---------------------------------------------------------------------------
+// AI & Utility Commands
+// ---------------------------------------------------------------------------
+
+/// Send a chat message to the AI backend.
 #[tauri::command]
 async fn chat_completion(
     _state: State<'_, AppState>,
@@ -413,6 +509,39 @@ async fn check_ai_health() -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn run_git_command(path: String, args: &[&str]) -> Result<(), String> {
+    let mut cmd_args = vec!["-C", &path];
+    cmd_args.extend_from_slice(args);
+
+    let output = Command::new("git")
+        .args(&cmd_args)
+        .output()
+        .map_err(|e| format!("Failed to run git: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Git error: {}", stderr));
+    }
+    Ok(())
+}
+
+fn run_git_command_raw(args: &[&str]) -> Result<(), String> {
+    let output = Command::new("git")
+        .args(args)
+        .output()
+        .map_err(|e| format!("Failed to run git: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Git error: {}", stderr));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Application entry
 // ---------------------------------------------------------------------------
 
@@ -437,6 +566,13 @@ pub fn run() {
             git_discard_file,
             git_commit,
             git_show_diff,
+            git_list_branches,
+            git_switch_branch,
+            git_create_branch,
+            git_stash_push,
+            git_stash_list,
+            git_stash_pop,
+            git_stash_drop,
             get_current_dir,
             chat_completion,
             check_ai_health,
