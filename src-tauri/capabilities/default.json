@@ -1,0 +1,32 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for Aurora Editor",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open",
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "dialog:allow-message",
+    "dialog:allow-ask",
+    "fs:default",
+    {
+      "identifier": "fs:allow-read",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$APPDATA/**" },
+        { "path": "$RESOURCE/**" },
+        { "path": "$TEMP/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$APPDATA/**" },
+        { "path": "$TEMP/**" }
+      ]
+    }
+  ]
+}

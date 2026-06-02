@@ -1,0 +1,16 @@
+/target
+/**/target
+.idea
+.vscode
+Cargo.lock
+node_modules
+
+# Frontend build output (Vite)
+/dist
+
+# Tauri build output
+/src-tauri/target
+
+# FreeLLMAPI sidecar (cloned, not vendored in git)
+/sidecar/freellmapi
+/sidecar/freellmapi/node_modules
