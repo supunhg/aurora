@@ -19,12 +19,14 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [gitBranch, setGitBranch] = useState("main");
+  const [workspacePath, setWorkspacePath] = useState("");
 
   // Load initial file tree from current directory
   useEffect(() => {
     const init = async () => {
       try {
         const cwd = await invoke<string>("get_current_dir");
+        setWorkspacePath(cwd);
         const entries = await invoke<FileEntry[]>("list_directory", {
           path: cwd,
           depth: 0,
@@ -152,6 +154,8 @@ export default function App() {
             activeFilePath={activeFile?.path || ""}
             onOpenFile={handleOpenFile}
             onClose={setShowSidebar}
+            workspacePath={workspacePath}
+            gitBranch={gitBranch}
           />
         )}
 

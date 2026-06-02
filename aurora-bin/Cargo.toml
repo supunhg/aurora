@@ -1,0 +1,17 @@
+[package]
+name = "aurora-bin"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+gui = ["ui/gui"]
+
+[dependencies]
+aurora-core = { path = "../aurora-core" }
+ai = { path = "../ai" }
+ui = { path = "../ui" }
+plugin = { path = "../plugin", default-features = false }
+editor = { path = "../editor" }
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

@@ -1,0 +1,50 @@
+# Aurora Default Configuration
+# Copy to ~/.config/aurora/aurora.toml and customize.
+# Per-project overrides go in .aurora.toml at the project root.
+
+[theme]
+mode = "dark"
+font_size = 14.0
+font_family = "JetBrains Mono"
+line_height = 1.5
+
+[editor]
+tab_width = 4
+use_spaces = true
+line_numbers = true
+git_gutter = true
+multi_cursor = true
+max_undo_depth = 10000
+word_wrap = false
+bracket_matching = true
+auto_pairs = true
+
+[keybindings]
+mode = "chord"
+
+[ai]
+default_model = "auto"
+fallback_chain = [
+    "local/llama-3.2",
+    "groq/llama-3.3-70b",
+    "cerebras/qwen3",
+    "gemini/gemini-2.5-flash",
+]
+local_enabled = true
+cloud_enabled = false
+max_context_tokens = 8192
+inline_debounce_ms = 200
+sticky_session_ttl_minutes = 30
+
+[ai.sidecar]
+enabled = true
+auto_start = true
+freellmapi_path = "sidecar/freellmapi"
+port = 3001
+model = "auto"
+
+[lsp]
+debounce_ms = 150
+
+[terminal]
+scrollback_lines = 10000

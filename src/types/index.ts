@@ -21,3 +21,16 @@ export interface OpenFile {
   modified: boolean;
   language: string;
 }
+
+export interface GitFileStatus {
+  path: string;
+  status: string;
+  staged: boolean;
+  original_path: string | null;
+}
+
+export interface GitCommitInfo {
+  hash: string;
+  message: string;
+  author: string;
+}

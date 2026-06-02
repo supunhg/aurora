@@ -1,0 +1,11 @@
+[package]
+name = "plugin"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+# enable WASI host support
+wasi = ["wasmtime"]
+
+[dependencies]
+wasmtime = { version = "21", optional = true }

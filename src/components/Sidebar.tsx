@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { FileEntry, SidebarView } from "../types";
 import { fileIcon, fileIconColor } from "../utils/icons";
+import SourceControlSidebar from "./SourceControlSidebar";
 
 interface Props {
   view: SidebarView;
@@ -9,9 +10,11 @@ interface Props {
   activeFilePath: string;
   onOpenFile: (path: string) => void;
   onClose: (show: boolean) => void;
+  workspacePath?: string;
+  gitBranch?: string;
 }
 
-export default function Sidebar({ view, fileTree, activeFilePath, onOpenFile, onClose }: Props) {
+export default function Sidebar({ view, fileTree, activeFilePath, onOpenFile, onClose, workspacePath, gitBranch }: Props) {
   switch (view) {
     case "explorer":
       return (
@@ -25,7 +28,13 @@ export default function Sidebar({ view, fileTree, activeFilePath, onOpenFile, on
     case "search":
       return <PlaceholderSidebar title="SEARCH" icon="🔍" text="Search" />;
     case "source-control":
-      return <PlaceholderSidebar title="SOURCE CONTROL" icon="⎇" text="Git" />;
+      return (
+        <SourceControlSidebar
+          workspacePath={workspacePath || ""}
+          gitBranch={gitBranch || "main"}
+          onClose={onClose}
+        />
+      );
     case "debug":
       return <PlaceholderSidebar title="RUN AND DEBUG" icon="▶" text="Debug" />;
     case "extensions":

@@ -1,0 +1,46 @@
+[package]
+name = "ai"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "ai"
+path = "src/lib.rs"
+
+[dependencies]
+aurora-config = { path = "../config", package = "config" }
+
+async-trait = "0.1"
+glob = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+zeroize = { version = "1.5", features = ["derive"] }
+tokio = { version = "1", features = ["rt", "macros", "time", "sync", "process", "io-util"] }
+tokio-stream = "0.1"
+futures = "0.3"
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "1.0"
+tracing = "0.1"
+dashmap = "5.5"
+parking_lot = "0.12"
+
+# HTTP (for cloud providers and sidecar)
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+
+# Encryption
+ring = { version = "0.17", optional = true }
+
+# Storage
+rusqlite = { version = "0.31", features = ["bundled"], optional = true }
+
+# Time
+chrono = { version = "0.4", optional = true }
+
+[features]
+default = ["cloud-ai"]
+cloud-ai = []
+local-ai = []
+keychain = ["ring", "rusqlite", "chrono"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

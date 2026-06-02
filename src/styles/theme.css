@@ -787,3 +787,451 @@ html, body, #root {
   font-size: 12px;
   color: var(--text-secondary);
 }
+
+/* ---------------------------------------------------------------------------
+   Source Control Sidebar
+   --------------------------------------------------------------------------- */
+
+.sc-branch-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-section);
+  flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.sc-branch-icon {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sc-branch-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-blue);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Commit area */
+.sc-commit-area {
+  padding: 8px;
+  border-bottom: 1px solid var(--border-section);
+  flex-shrink: 0;
+}
+
+.sc-commit-input {
+  width: 100%;
+  background: var(--bg-active);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 6px 8px;
+  resize: none;
+  outline: none;
+  line-height: 1.4;
+  transition: border-color var(--transition-fast);
+}
+
+.sc-commit-input:focus {
+  border-color: var(--accent-blue);
+}
+
+.sc-commit-input::placeholder {
+  color: var(--text-muted);
+}
+
+.sc-commit-input:disabled {
+  opacity: 0.5;
+}
+
+.sc-commit-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.sc-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.sc-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.sc-btn-commit {
+  background: rgba(137, 180, 250, 0.2);
+  color: var(--accent-blue);
+  flex: 1;
+  font-weight: 600;
+}
+
+.sc-btn-commit:hover:not(:disabled) {
+  background: rgba(137, 180, 250, 0.35);
+}
+
+.sc-btn-stage-all {
+  background: var(--bg-muted);
+  color: var(--text-secondary);
+}
+
+.sc-btn-stage-all:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sc-commit-result {
+  margin-top: 6px;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 3px;
+}
+
+.sc-commit-result.success {
+  color: var(--accent-green);
+  background: rgba(166, 227, 161, 0.1);
+}
+
+.sc-commit-result.error {
+  color: var(--accent-red);
+  background: rgba(243, 139, 168, 0.1);
+}
+
+/* Sections (Staged Changes, Changes, Untracked) */
+.sc-section {
+  border-bottom: 1px solid var(--border-section);
+}
+
+.sc-section-header {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--transition-fast);
+}
+
+.sc-section-header:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.sc-section-arrow {
+  width: 12px;
+  font-size: 8px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.sc-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-left: 4px;
+  flex: 1;
+}
+
+.sc-section-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-muted);
+  padding: 0 6px;
+  border-radius: 8px;
+  min-width: 18px;
+  text-align: center;
+}
+
+/* File items */
+.sc-file-list {
+  padding: 0;
+}
+
+.sc-file-item {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  padding-right: 4px;
+  position: relative;
+}
+
+.sc-file-item:hover {
+  background: var(--tree-hover-bg);
+}
+
+.sc-file-item.selected {
+  background: var(--tree-selected-bg);
+}
+
+.sc-file-item.selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  width: 2px;
+  height: 24px;
+  background: var(--accent-blue);
+}
+
+.sc-file-main {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  padding-left: 8px;
+}
+
+.sc-badge {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 2px;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+.badge-modified {
+  background: rgba(249, 226, 175, 0.2);
+  color: var(--accent-yellow);
+}
+
+.badge-added {
+  background: rgba(166, 227, 161, 0.2);
+  color: var(--accent-green);
+}
+
+.badge-deleted {
+  background: rgba(243, 139, 168, 0.2);
+  color: var(--accent-red);
+}
+
+.badge-renamed {
+  background: rgba(203, 166, 247, 0.2);
+  color: var(--accent-purple);
+}
+
+.badge-untracked {
+  background: rgba(120, 128, 170, 0.25);
+  color: var(--text-secondary);
+}
+
+.badge-default {
+  background: rgba(120, 128, 170, 0.2);
+  color: var(--text-secondary);
+}
+
+.sc-file-icon {
+  width: 14px;
+  text-align: center;
+  font-size: 12px;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+
+.sc-file-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* File action buttons (stage, unstage, discard) */
+.sc-file-actions {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.sc-file-item:hover .sc-file-actions {
+  display: flex;
+}
+
+.sc-action-btn {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 2px;
+  font-size: 12px;
+  transition: all var(--transition-fast);
+}
+
+.sc-action-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.sc-action-discard:hover {
+  color: var(--accent-red);
+}
+
+/* Diff viewer */
+.sc-diff-section {
+  border-top: 1px solid var(--border-section);
+  display: flex;
+  flex-direction: column;
+  max-height: 300px;
+}
+
+.sc-diff-header {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
+}
+
+.sc-diff-title {
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-diff-close {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 2px;
+  font-size: 14px;
+  transition: all var(--transition-fast);
+}
+
+.sc-diff-close:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.sc-diff-content {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.sc-diff-loading {
+  padding: 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.sc-diff-pre {
+  margin: 0;
+  padding: 4px 0;
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.sc-diff-pre code {
+  display: block;
+}
+
+.diff-line {
+  display: flex;
+  padding: 0 8px;
+  min-height: 16px;
+  align-items: flex-start;
+}
+
+.diff-prefix {
+  width: 12px;
+  flex-shrink: 0;
+  text-align: right;
+  margin-right: 4px;
+  font-weight: 700;
+}
+
+.diff-text {
+  flex: 1;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.diff-header {
+  background: rgba(137, 180, 250, 0.08);
+  color: var(--text-secondary);
+}
+
+.diff-hunk {
+  background: rgba(137, 180, 250, 0.06);
+  color: var(--accent-cyan);
+}
+
+.diff-added {
+  background: rgba(166, 227, 161, 0.08);
+  color: var(--accent-green);
+}
+
+.diff-removed {
+  background: rgba(243, 139, 168, 0.08);
+  color: var(--accent-red);
+}
+
+/* Empty state */
+.sc-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.sc-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 6px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.sc-empty-icon {
+  font-size: 28px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.sc-empty-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.sc-empty-detail {
+  font-size: 11px;
+  color: var(--text-muted);
+  max-width: 200px;
+}
