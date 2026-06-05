@@ -5,12 +5,24 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+pub mod pool;
+pub mod quota;
+
 /// A decrypted API key that zeroizes on drop.
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct DecryptedApiKey {
     #[zeroize]
     pub value: String,
     pub provider: String,
+}
+
+impl Clone for DecryptedApiKey {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value.clone(),
+            provider: self.provider.clone(),
+        }
+    }
 }
 
 impl std::fmt::Debug for DecryptedApiKey {
@@ -83,12 +95,19 @@ impl Default for EphemeralKeyStore {
     }
 }
 
+// Re-export pool and quota types for convenience.
+pub use pool::{
+    KeyHealth, KeyInfo, KeySelectionStrategy, KeySource, KeyUsageSnapshot, PoolKeyEntry,
+    ProviderKeyPool, SelectedKey,
+};
+pub use quota::ProviderQuota;
+
 // ---------------------------------------------------------------------------
 // Encrypted key store (requires `keychain` feature)
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "keychain")]
-mod encrypted {
+pub mod encrypted {
     use super::*;
     use ring::aead::{Aad, Aes256Gcm, LessSafeKey, Nonce, UnboundKey};
     use ring::rand::{SecureRandom, SystemRandom};
@@ -120,6 +139,7 @@ mod encrypted {
                 "CREATE TABLE IF NOT EXISTS api_keys (
                     key_id TEXT PRIMARY KEY,
                     provider TEXT NOT NULL,
+                    label TEXT,
                     encrypted_value BLOB NOT NULL,
                     nonce BLOB NOT NULL,
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -142,7 +162,7 @@ mod encrypted {
         }
 
         /// Store an API key encrypted at rest.
-        pub fn add_key(&self, provider: &str, plaintext: &str) -> AiResult<KeyId> {
+        pub fn add_key(&self, provider: &str, label: Option<&str>, plaintext: &str) -> AiResult<KeyId> {
             let key_id = KeyId(format!("{}-{}", provider, uuid::Uuid::new_v4()));
 
             let mut nonce_bytes = [0u8; NONCE_LEN];
@@ -157,8 +177,8 @@ mod encrypted {
                 .map_err(|e| crate::error::AiError::KeyStore(format!("Encrypt: {}", e)))?;
 
             self.db.execute(
-                "INSERT INTO api_keys (key_id, provider, encrypted_value, nonce) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![key_id.0, provider, in_out, &nonce_bytes[..]],
+                "INSERT INTO api_keys (key_id, provider, label, encrypted_value, nonce) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![key_id.0, provider, label.unwrap_or(""), in_out, &nonce_bytes[..]],
             ).map_err(|e| crate::error::AiError::KeyStore(format!("SQLite insert: {}", e)))?;
 
             Ok(key_id)
@@ -212,18 +232,19 @@ mod encrypted {
             }
         }
 
-        /// List all stored key IDs and their providers (without revealing keys).
-        pub fn list_keys(&self) -> AiResult<Vec<(KeyId, String)>> {
+        /// List all stored key IDs, providers, and labels (without revealing keys).
+        pub fn list_keys(&self) -> AiResult<Vec<(KeyId, String, String)>> {
             let mut stmt = self
                 .db
-                .prepare("SELECT key_id, provider FROM api_keys ORDER BY created_at DESC")
+                .prepare("SELECT key_id, provider, label FROM api_keys ORDER BY created_at DESC")
                 .map_err(|e| crate::error::AiError::KeyStore(format!("SQLite prepare: {}", e)))?;
 
             let rows = stmt
                 .query_map([], |row| {
                     let key_id: String = row.get(0)?;
                     let provider: String = row.get(1)?;
-                    Ok((KeyId(key_id), provider))
+                    let label: String = row.get(2)?;
+                    Ok((KeyId(key_id), provider, label))
                 })
                 .map_err(|e| crate::error::AiError::KeyStore(format!("SQLite query: {}", e)))?;
 

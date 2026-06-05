@@ -95,6 +95,56 @@ fn simplify_model(model: &str) -> &str {
     model
 }
 
+impl GroqProvider {
+    /// Internal helper: build the request body JSON.
+    fn build_request_body(&self, prompt: &str, stream: bool) -> serde_json::Value {
+        serde_json::json!({
+            "model": self.model,
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.7,
+            "max_tokens": 2048,
+            "stream": stream,
+        })
+    }
+
+    /// Internal helper: execute the HTTP request and return the raw response.
+    async fn do_request(
+        &self,
+        prompt: &str,
+        api_key: &str,
+        stream: bool,
+    ) -> AiResult<reqwest::Response> {
+        let url = format!("{}/openai/v1/chat/completions", self.base_url);
+        let body = self.build_request_body(prompt, stream);
+
+        let response = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| AiError::HttpError(format!("Groq request failed: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body_text = response.text().await.unwrap_or_default();
+            return if status == 429 {
+                Err(AiError::RateLimited(format!("Groq: {}", body_text)))
+            } else {
+                Err(AiError::ProviderError(
+                    "groq".into(),
+                    format!("HTTP {}: {}", status, body_text),
+                ))
+            };
+        }
+
+        Ok(response)
+    }
+}
+
 #[async_trait]
 impl ProviderAdapter for GroqProvider {
     fn provider_id(&self) -> &str {
@@ -129,37 +179,16 @@ impl ProviderAdapter for GroqProvider {
     }
 
     async fn chat_completion(&self, prompt: &str) -> AiResult<String> {
-        let url = format!("{}/openai/v1/chat/completions", self.base_url);
-        let body = serde_json::json!({
-            "model": self.model,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.7,
-            "max_tokens": 2048,
-        });
+        self.chat_completion_with_key(prompt, None).await
+    }
 
-        let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| AiError::HttpError(format!("Groq request failed: {}", e)))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body_text = response.text().await.unwrap_or_default();
-            return if status == 429 {
-                Err(AiError::RateLimited(format!("Groq: {}", body_text)))
-            } else {
-                Err(AiError::ProviderError(
-                    "groq".into(),
-                    format!("HTTP {}: {}", status, body_text),
-                ))
-            };
-        }
+    async fn chat_completion_with_key(
+        &self,
+        prompt: &str,
+        key: Option<&str>,
+    ) -> AiResult<String> {
+        let api_key = key.unwrap_or(&self.api_key);
+        let response = self.do_request(prompt, api_key, false).await?;
 
         let data: serde_json::Value = response
             .json()
@@ -175,40 +204,19 @@ impl ProviderAdapter for GroqProvider {
     }
 
     async fn stream_chat_completion(&self, prompt: &str, tx: mpsc::Sender<String>) -> AiResult<()> {
+        self.stream_chat_completion_with_key(prompt, None, tx).await
+    }
+
+    async fn stream_chat_completion_with_key(
+        &self,
+        prompt: &str,
+        key: Option<&str>,
+        tx: mpsc::Sender<String>,
+    ) -> AiResult<()> {
         use futures::StreamExt;
 
-        let url = format!("{}/openai/v1/chat/completions", self.base_url);
-        let body = serde_json::json!({
-            "model": self.model,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.7,
-            "max_tokens": 2048,
-            "stream": true,
-        });
-
-        let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| AiError::HttpError(format!("Groq stream request failed: {}", e)))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body_text = response.text().await.unwrap_or_default();
-            return if status == 429 {
-                Err(AiError::RateLimited(format!("Groq: {}", body_text)))
-            } else {
-                Err(AiError::ProviderError(
-                    "groq".into(),
-                    format!("HTTP {}: {}", status, body_text),
-                ))
-            };
-        }
+        let api_key = key.unwrap_or(&self.api_key);
+        let response = self.do_request(prompt, api_key, true).await?;
 
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {

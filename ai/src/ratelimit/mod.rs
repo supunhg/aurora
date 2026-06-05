@@ -5,6 +5,8 @@ use dashmap::DashMap;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
+use crate::keystore::quota::ProviderQuota;
+
 #[cfg(feature = "keychain")]
 use rusqlite::Connection;
 
@@ -34,14 +36,27 @@ impl SlidingWindow {
     }
 
     /// Check if a request would exceed the limit.
+    /// Uses `count()` which filters expired entries without mutating state.
     pub fn can_accept(&self) -> bool {
-        self.timestamps.len() < self.max_count
+        self.count() < self.max_count
     }
 
     /// Record a request timestamp.
     pub fn record(&mut self) {
         self.evict_old();
         self.timestamps.push_back(Instant::now());
+    }
+
+    /// Record a token count (for TPM/TPD tracking).
+    ///
+    /// TODO: This is O(N) in token count. For large responses, store
+    /// `(Instant, usize)` pairs per request and sum counts in `count()`
+    /// instead of pushing individual timestamps.
+    pub fn record_tokens(&mut self, token_count: usize) {
+        self.evict_old();
+        for _ in 0..token_count {
+            self.timestamps.push_back(Instant::now());
+        }
     }
 
     /// Number of requests in the current window.
@@ -59,6 +74,12 @@ impl SlidingWindow {
     /// Headroom as a fraction (0.0 - 1.0).
     pub fn headroom(&self) -> f64 {
         1.0 - self.usage()
+    }
+
+    /// Check if adding `count` more items would exceed the limit.
+    /// Uses `count()` which filters expired entries without mutating state.
+    pub fn can_accept_with_count(&self, count: usize) -> bool {
+        self.count() + count <= self.max_count
     }
 
     fn evict_old(&mut self) {
@@ -85,11 +106,16 @@ pub struct RateCounters {
 
 impl RateCounters {
     pub fn new() -> Self {
+        Self::with_quota(&ProviderQuota::default_unknown())
+    }
+
+    /// Create rate counters with provider-specific quota limits.
+    pub fn with_quota(quota: &ProviderQuota) -> Self {
         Self {
-            rpm: SlidingWindow::new(Duration::from_secs(60), 60),
-            rpd: SlidingWindow::new(Duration::from_secs(86400), 10_000),
-            tpm: SlidingWindow::new(Duration::from_secs(60), 1_000_000),
-            tpd: SlidingWindow::new(Duration::from_secs(86400), 100_000_000),
+            rpm: SlidingWindow::new(Duration::from_secs(60), quota.rpm as usize),
+            rpd: SlidingWindow::new(Duration::from_secs(86400), quota.rpd as usize),
+            tpm: SlidingWindow::new(Duration::from_secs(60), quota.tpm as usize),
+            tpd: SlidingWindow::new(Duration::from_secs(86400), quota.tpd as usize),
             cooldown_until: None,
         }
     }
@@ -105,16 +131,16 @@ impl RateCounters {
 
         self.rpm.can_accept()
             && self.rpd.can_accept()
-            && self.tpm.count() + estimated_tokens <= 1_000_000
-            && self.tpd.count() + estimated_tokens <= 100_000_000
+            && self.tpm.can_accept_with_count(estimated_tokens)
+            && self.tpd.can_accept_with_count(estimated_tokens)
     }
 
     /// Record a request (tokens in/out).
-    pub fn record_request(&mut self, _tokens_used: usize, success: bool) {
+    pub fn record_request(&mut self, tokens_used: usize, success: bool) {
         self.rpm.record();
         self.rpd.record();
-        self.tpm.record();
-        self.tpd.record();
+        self.tpm.record_tokens(tokens_used);
+        self.tpd.record_tokens(tokens_used);
 
         if !success {
             self.cooldown_until = Some(Instant::now() + Duration::from_secs(10));
@@ -128,6 +154,33 @@ impl RateCounters {
             .min(self.rpd.headroom())
             .min(self.tpm.headroom())
             .min(self.tpd.headroom())
+    }
+
+    /// Maximum usage percentage across all dimensions (0.0 - 1.0).
+    pub fn max_usage(&self) -> f64 {
+        1.0 - self.min_headroom()
+    }
+
+    /// Check if usage is approaching the limit (>= 80%).
+    pub fn is_approaching_limit(&self) -> bool {
+        self.max_usage() >= 0.80
+    }
+
+    /// Check if usage is critical (>= 95%).
+    pub fn is_critical(&self) -> bool {
+        self.max_usage() >= 0.95
+    }
+
+    /// Get the dimension with the highest usage and its percentage.
+    pub fn hottest_dimension(&self) -> (&'static str, f64) {
+        let dims = [
+            ("rpm", self.rpm.usage()),
+            ("rpd", self.rpd.usage()),
+            ("tpm", self.tpm.usage()),
+            ("tpd", self.tpd.usage()),
+        ];
+        dims.into_iter().max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or(("rpm", 0.0))
     }
 }
 
@@ -204,6 +257,40 @@ impl RateLimitLedger {
             }
         }
         min_room
+    }
+
+    /// Ensure counters exist for a key, creating them with the given quota if missing.
+    pub fn ensure_counters(&self, key: &RateKey, quota: &ProviderQuota) {
+        self.counters.entry(key.clone()).or_insert_with(|| RateCounters::with_quota(quota));
+    }
+
+    /// Get the maximum usage for a specific key (0.0 - 1.0).
+    pub fn key_usage(&self, key: &RateKey) -> f64 {
+        self.counters
+            .get(key)
+            .map(|c| c.max_usage())
+            .unwrap_or(0.0)
+    }
+
+    /// Check if a key is approaching its limit (>= 80%).
+    pub fn is_approaching_limit(&self, key: &RateKey) -> bool {
+        self.counters
+            .get(key)
+            .map(|c| c.is_approaching_limit())
+            .unwrap_or(false)
+    }
+
+    /// Check if a key is critically near its limit (>= 95%).
+    pub fn is_critical(&self, key: &RateKey) -> bool {
+        self.counters
+            .get(key)
+            .map(|c| c.is_critical())
+            .unwrap_or(false)
+    }
+
+    /// Get the hottest dimension and its usage for a key.
+    pub fn hottest_dimension(&self, key: &RateKey) -> Option<(&'static str, f64)> {
+        self.counters.get(key).map(|c| c.hottest_dimension())
     }
 
     /// Number of tracked keys.

@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::process::Command;
 use std::sync::mpsc;
+use std::sync::Mutex;
 use tauri::{Emitter, State};
 
 // ---------------------------------------------------------------------------
@@ -10,6 +12,9 @@ use tauri::{Emitter, State};
 
 pub struct AppState {
     pub ai_client: Option<ai::FreeLlmClient>,
+    /// Encrypted key store for API keys (AES-256-GCM + SQLite).
+    /// Wrapped in Mutex because rusqlite::Connection is Send but not Sync.
+    pub keystore: Mutex<Option<ai::EncryptedKeyStore>>,
 }
 
 
@@ -81,8 +86,159 @@ pub struct GutterDecoration {
 }
 
 // ---------------------------------------------------------------------------
+// Key Management types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiKeyInfo {
+    pub key_id: String,
+    pub provider: String,
+    pub label: String,
+    pub source: String,
+    pub status: String,
+    pub percent_used: f64,
+    pub rpm_used: u32,
+    pub rpm_limit: u32,
+    pub last_used: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyUsageInfo {
+    pub provider: String,
+    pub key_id: String,
+    pub label: String,
+    pub rpm_used: u32,
+    pub rpm_limit: u32,
+    pub rpd_used: u32,
+    pub rpd_limit: u32,
+    pub tpm_used: u32,
+    pub tpm_limit: u32,
+    pub tpd_used: u32,
+    pub tpd_limit: u32,
+    pub percent_used: f64,
+    pub status: String,
+}
+
+// ---------------------------------------------------------------------------
 // Tauri Commands
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Key Management Commands
+// ---------------------------------------------------------------------------
+
+/// Derive a deterministic 32-byte AES key from machine-specific info.
+fn derive_encryption_key() -> [u8; 32] {
+    let hostname = std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("COMPUTERNAME"))
+        .unwrap_or_else(|_| "unknown".into());
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "user".into());
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| "/tmp".into());
+
+    let mut hasher = Sha256::new();
+    hasher.update(hostname.as_bytes());
+    hasher.update(user.as_bytes());
+    hasher.update(home.as_bytes());
+    hasher.update(b"aurora-key-derive-v1");
+    let result = hasher.finalize();
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&result);
+    key
+}
+
+/// Add a new API key to the encrypted store.
+#[tauri::command]
+fn add_api_key(
+    state: State<'_, AppState>,
+    provider: String,
+    api_key: String,
+    label: String,
+) -> Result<ApiKeyInfo, String> {
+    let guard = state.keystore.lock().map_err(|e| e.to_string())?;
+    let store = guard.as_ref().ok_or("Key store not initialized")?;
+
+    let key_id = store
+        .add_key(&provider, Some(&label), &api_key)
+        .map_err(|e| e.to_string())?;
+
+    Ok(ApiKeyInfo {
+        key_id: key_id.0,
+        provider,
+        label,
+        source: "ui".to_string(),
+        status: "healthy".to_string(),
+        percent_used: 0.0,
+        rpm_used: 0,
+        rpm_limit: 20,
+        last_used: None,
+    })
+}
+
+/// List all stored API keys (without exposing actual key values).
+#[tauri::command]
+fn list_api_keys(state: State<'_, AppState>) -> Result<Vec<ApiKeyInfo>, String> {
+    let guard = state.keystore.lock().map_err(|e| e.to_string())?;
+    let store = guard.as_ref().ok_or("Key store not initialized")?;
+
+    let keys = store.list_keys().map_err(|e| e.to_string())?;
+
+    Ok(keys
+        .into_iter()
+        .map(|(id, provider, label)| ApiKeyInfo {
+            key_id: id.0,
+            provider,
+            label: if label.is_empty() {
+                "Unlabeled".to_string()
+            } else {
+                label
+            },
+            source: "ui".to_string(),
+            status: "healthy".to_string(),
+            percent_used: 0.0,
+            rpm_used: 0,
+            rpm_limit: 20,
+            last_used: None,
+        })
+        .collect())
+}
+
+/// Delete an API key from the store.
+#[tauri::command]
+fn delete_api_key(state: State<'_, AppState>, key_id: String) -> Result<(), String> {
+    let guard = state.keystore.lock().map_err(|e| e.to_string())?;
+    let store = guard.as_ref().ok_or("Key store not initialized")?;
+    store
+        .remove_key(&ai::KeyId(key_id))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Test an API key by attempting a minimal request.
+#[tauri::command]
+fn test_api_key(provider: String, api_key: String) -> Result<bool, String> {
+    // For the MVP, we do a quick format check + length validation.
+    // In production, this should attempt an actual provider health check.
+    let is_valid = !api_key.trim().is_empty() && api_key.len() >= 8;
+    if !is_valid {
+        return Ok(false);
+    }
+
+    // Provider-specific format hints
+    let looks_correct = match provider.as_str() {
+        "groq" => api_key.starts_with("gsk_"),
+        "openai" => api_key.starts_with("sk-"),
+        "gemini" => api_key.starts_with("AIzaSy"),
+        "anthropic" => api_key.starts_with("sk-ant-"),
+        "cerebras" => api_key.starts_with("csk-"),
+        _ => true,
+    };
+
+    Ok(looks_correct)
+}
 
 /// List a directory's contents, sorted with directories first.
 #[tauri::command]
@@ -776,11 +932,24 @@ fn parse_diff_gutter(diff: &str) -> Vec<GutterDecoration> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Derive machine-specific encryption key and open the encrypted key store
+    let key_bytes = derive_encryption_key();
+    let keystore = match ai::EncryptedKeyStore::open(&key_bytes) {
+        Ok(ks) => Some(ks),
+        Err(e) => {
+            eprintln!("[tauri] Failed to open encrypted keystore: {}. Keys will not be persisted.", e);
+            None
+        }
+    };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .manage(AppState { ai_client: None })
+        .manage(AppState {
+            ai_client: None,
+            keystore: Mutex::new(keystore),
+        })
         .invoke_handler(tauri::generate_handler![
             list_directory,
             read_file,
@@ -808,6 +977,10 @@ pub fn run() {
             get_current_dir,
             chat_completion,
             check_ai_health,
+            add_api_key,
+            list_api_keys,
+            delete_api_key,
+            test_api_key,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Aurora");

@@ -23,6 +23,7 @@ notify = { version = "7", features = ["macos_kqueue"] }
 
 # Aurora workspace crates
 editor = { path = "../editor" }
-ai = { path = "../ai" }
+ai = { path = "../ai", features = ["keychain"] }
 config = { path = "../config", package = "config" }
 lsp = { path = "../lsp" }
+sha2 = "0.10"

@@ -4,6 +4,7 @@ import type { FileEntry, SidebarView } from "../types";
 import { fileIcon, fileIconColor } from "../utils/icons";
 import SourceControlSidebar from "./SourceControlSidebar";
 import SearchSidebar from "./SearchSidebar";
+import KeyManagerPanel from "./KeyManagerPanel";
 import Icon from "./Icon";
 
 interface Props {
@@ -51,6 +52,8 @@ export default function Sidebar({ view, fileTree, activeFilePath, onOpenFile, on
       return <PlaceholderSidebar title="EXTENSIONS" icon="material-symbols:extension" text="Extensions" />;
     case "ai":
       return <PlaceholderSidebar title="AI CHAT" icon="material-symbols:auto-awesome" text="AI" description="Use the right-side chat panel for AI interactions." />;
+    case "keys":
+      return <KeyManagerPanel onClose={onClose} />;
     default:
       return null;
   }

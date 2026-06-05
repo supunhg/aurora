@@ -102,6 +102,22 @@ pub trait ProviderAdapter: Send + Sync {
     /// this trait in the future.
     async fn chat_completion(&self, prompt: &str) -> AiResult<String>;
 
+    /// Execute a chat completion with an explicit API key override.
+    ///
+    /// If `key` is `Some`, the provider must use that key for the request.
+    /// If `key` is `None`, the provider falls back to its default/baked-in key.
+    ///
+    /// Default implementation delegates to [`chat_completion`].
+    /// Providers that support key rotation should override this method.
+    async fn chat_completion_with_key(
+        &self,
+        prompt: &str,
+        key: Option<&str>,
+    ) -> AiResult<String> {
+        let _ = key;
+        self.chat_completion(prompt).await
+    }
+
     /// Stream a chat completion response through the provided channel.
     ///
     /// Default implementation collects the full response from [`chat_completion`]
@@ -115,6 +131,19 @@ pub trait ProviderAdapter: Send + Sync {
         let response = self.chat_completion(prompt).await?;
         tx.send(response).await.map_err(|_| AiError::Cancelled)?;
         Ok(())
+    }
+
+    /// Stream a chat completion with an explicit API key override.
+    ///
+    /// Default implementation delegates to [`stream_chat_completion`].
+    async fn stream_chat_completion_with_key(
+        &self,
+        prompt: &str,
+        key: Option<&str>,
+        tx: tokio::sync::mpsc::Sender<String>,
+    ) -> AiResult<()> {
+        let _ = key;
+        self.stream_chat_completion(prompt, tx).await
     }
 }
 

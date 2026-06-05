@@ -13,6 +13,7 @@ const items: { view: SidebarView; icon: string; label: string }[] = [
   { view: "debug", icon: "material-symbols:play-arrow", label: "Run and Debug" },
   { view: "extensions", icon: "material-symbols:extension", label: "Extensions" },
   { view: "ai", icon: "material-symbols:auto-awesome", label: "AI Chat" },
+  { view: "keys", icon: "material-symbols:key", label: "AI Key Manager" },
 ];
 
 export default function ActivityBar({ activeView, onViewChange }: Props) {

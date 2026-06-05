@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { FileEntry, ChatMessage, SidebarView, OpenFile, FileWatchEvent } from "./types";
+import type { FileEntry, ChatMessage, SidebarView, OpenFile, FileWatchEvent, AiKeyStatus, KeyRotationEventPayload } from "./types";
 import { fileIcon } from "./utils/icons";
 import ActivityBar from "./components/ActivityBar";
 import Sidebar from "./components/Sidebar";
@@ -33,11 +33,67 @@ export default function App() {
   // Debounced trigger for git status auto-refresh on file edits
   const [gitRefreshTrigger, setGitRefreshTrigger] = useState(0);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // AI key rotation / usage state
+  const [aiKeyStatus, setAiKeyStatus] = useState<AiKeyStatus | null>(null);
+  const [aiPaused, setAiPaused] = useState(false);
 
   // Cleanup debounce timer on unmount
   useEffect(() => {
     return () => {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
+  }, []);
+
+  // Listen for key rotation events from Tauri backend
+  useEffect(() => {
+    const unlisten = listen<KeyRotationEventPayload>("key-rotation-event", (event) => {
+      const payload = event.payload;
+      switch (payload.event_type) {
+        case "key_approaching":
+        case "usage_updated":
+          if (payload.provider && payload.key_label && payload.percent_used !== undefined) {
+            setAiKeyStatus({
+              provider: payload.provider,
+              model: payload.key_label,
+              key_label: payload.key_label,
+              percent_used: payload.percent_used,
+              dimension: payload.dimension || "rpm",
+              state: payload.percent_used > 95 ? "critical" : payload.percent_used >= 80 ? "approaching" : "healthy",
+            });
+          }
+          break;
+        case "key_critical":
+          if (payload.provider && payload.key_label && payload.percent_used !== undefined) {
+            setAiKeyStatus({
+              provider: payload.provider,
+              model: payload.key_label,
+              key_label: payload.key_label,
+              percent_used: payload.percent_used,
+              dimension: payload.dimension || "rpm",
+              state: "critical",
+            });
+          }
+          break;
+        case "all_exhausted":
+          setAiPaused(true);
+          setAiKeyStatus({
+            provider: "",
+            model: "",
+            key_label: "",
+            percent_used: 100,
+            dimension: "",
+            state: "exhausted",
+          });
+          break;
+        case "key_added":
+          // If keys were added while paused, resume AI
+          setAiPaused(false);
+          break;
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
     };
   }, []);
 
@@ -309,9 +365,10 @@ export default function App() {
             activeFile={activeFile}
             gitBranch={gitBranch}
             isAiThinking={isAiThinking}
-            aiStatus={isAiThinking ? "Thinking..." : "AI Ready"}
+            aiStatus={isAiThinking ? "Thinking..." : aiPaused ? "AI Paused" : "AI Ready"}
             watcherActive={watcherActive}
             workspacePath={workspacePath}
+            aiKeyStatus={aiKeyStatus}
           />
         </div>
 

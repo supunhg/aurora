@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 /// Unified error type for the AI subsystem.
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum AiError {
     #[error("Provider '{0}' not found")]
     ProviderNotFound(String),
@@ -11,6 +11,9 @@ pub enum AiError {
 
     #[error("All providers failed. Last error: {0}")]
     AllProvidersFailed(String),
+
+    #[error("All API keys exhausted across all providers")]
+    AllKeysExhausted,
 
     #[error("Key not found: {0}")]
     KeyNotFound(String),

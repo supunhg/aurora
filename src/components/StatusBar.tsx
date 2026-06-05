@@ -1,4 +1,4 @@
-import type { OpenFile } from "../types";
+import type { OpenFile, AiKeyStatus } from "../types";
 import Icon from "./Icon";
 
 interface Props {
@@ -8,6 +8,7 @@ interface Props {
   aiStatus: string;
   watcherActive?: boolean;
   workspacePath?: string;
+  aiKeyStatus?: AiKeyStatus | null;
 }
 
 export default function StatusBar({
@@ -17,6 +18,7 @@ export default function StatusBar({
   aiStatus,
   watcherActive = true,
   workspacePath = "",
+  aiKeyStatus = null,
 }: Props) {
   return (
     <div className="status-bar">
@@ -71,6 +73,45 @@ export default function StatusBar({
           )}
           {isAiThinking ? "Thinking..." : aiStatus}
         </span>
+
+        {/* Key usage indicator */}
+        {aiKeyStatus && aiKeyStatus.state !== "exhausted" && (
+          <span
+            className="status-bar-item"
+            style={{
+              color:
+                aiKeyStatus.state === "critical"
+                  ? "var(--accent-red)"
+                  : aiKeyStatus.state === "approaching"
+                    ? "var(--accent-yellow)"
+                    : "var(--status-ai-ready)",
+            }}
+            title={`${aiKeyStatus.provider} — ${aiKeyStatus.key_label} — ${aiKeyStatus.percent_used.toFixed(0)}% ${aiKeyStatus.dimension}`}
+          >
+            <Icon
+              icon={
+                aiKeyStatus.state === "critical"
+                  ? "material-symbols:error"
+                  : aiKeyStatus.state === "approaching"
+                    ? "material-symbols:warning"
+                    : "material-symbols:bolt"
+              }
+              size={12}
+              style={{ marginRight: 2 }}
+            />
+            {aiKeyStatus.provider} {aiKeyStatus.percent_used.toFixed(0)}%
+          </span>
+        )}
+        {aiKeyStatus?.state === "exhausted" && (
+          <span
+            className="status-bar-item"
+            style={{ color: "var(--accent-red)" }}
+            title="All keys exhausted — add keys in AI Key Manager"
+          >
+            <Icon icon="material-symbols:pause-circle" size={12} style={{ marginRight: 2 }} />
+            AI Paused
+          </span>
+        )}
         <span className="status-bar-item" style={{ color: "var(--text-muted)" }}>
           UTF-8
         </span>

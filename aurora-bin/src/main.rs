@@ -220,7 +220,7 @@ async fn run_self_test() {
             stream: false,
         };
 
-        match router.route(req).await {
+        match router.route(req, None).await {
             Ok(meta) => {
                 println!(
                     "[self-test] Request {}: routed to {}, fallbacks={}",
