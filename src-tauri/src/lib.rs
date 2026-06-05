@@ -4,14 +4,17 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::mpsc;
 use std::sync::Mutex;
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 // ---------------------------------------------------------------------------
 // Shared application state
 // ---------------------------------------------------------------------------
 
 pub struct AppState {
-    pub ai_client: Option<ai::FreeLlmClient>,
+    /// Sidecar base URL (defaults to http://127.0.0.1:3001).
+    pub sidecar_base_url: String,
+    /// Unified API key for authenticating against the sidecar.
+    pub sidecar_unified_key: Mutex<String>,
     /// Encrypted key store for API keys (AES-256-GCM + SQLite).
     /// Wrapped in Mutex because rusqlite::Connection is Send but not Sync.
     pub keystore: Mutex<Option<ai::EncryptedKeyStore>>,
@@ -150,14 +153,47 @@ fn derive_encryption_key() -> [u8; 32] {
     key
 }
 
-/// Add a new API key to the encrypted store.
+/// Add a new API key to the encrypted store and register with the sidecar.
 #[tauri::command]
-fn add_api_key(
+async fn add_api_key(
     state: State<'_, AppState>,
     provider: String,
     api_key: String,
     label: String,
 ) -> Result<ApiKeyInfo, String> {
+    // Map provider to sidecar platform name
+    let platform = match provider.as_str() {
+        "gemini" => "google",
+        "openai" | "anthropic" => "",
+        other => other,
+    };
+
+    // Register with the sidecar so it can use this key for provider calls
+    if !platform.is_empty() {
+        let unified = state
+            .sidecar_unified_key
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clone();
+        ai::FreeLlmClient::register_api_key(
+            &state.sidecar_base_url,
+            &unified,
+            platform,
+            &api_key,
+            &label,
+        )
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("[tauri] Failed to register key with sidecar: {}", e);
+        });
+    } else {
+        eprintln!(
+            "[tauri] Provider '{}' is not supported by the sidecar; key stored locally only",
+            provider
+        );
+    }
+
+    // Store in local keystore
     let guard = state.keystore.lock().map_err(|e| e.to_string())?;
     let store = guard.as_ref().ok_or("Key store not initialized")?;
 
@@ -614,7 +650,7 @@ fn git_stash_pop(path: String, index: Option<usize>) -> Result<(), String> {
 #[tauri::command]
 fn git_stash_drop(path: String, index: usize) -> Result<(), String> {
     let args: Vec<String> = vec![
-        "-C".into(), path.into(), "stash".into(), "drop".into(),
+        "-C".into(), path, "stash".into(), "drop".into(),
         format!("stash@{{{}}}", index),
     ];
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
@@ -662,11 +698,7 @@ fn search_with_git_grep(path: &str, query: &str, max: usize) -> Result<Vec<Searc
         let parts: Vec<&str> = line.splitn(3, ':').collect();
         if parts.len() >= 3 {
             if let Ok(line_num) = parts[1].parse::<usize>() {
-                let file_path = if parts[0].starts_with('/') || parts[0].contains('/') {
-                    parts[0].to_string()
-                } else {
-                    parts[0].to_string()
-                };
+                let file_path = parts[0].to_string();
                 results.push(SearchResult {
                     path: file_path,
                     line: line_num,
@@ -708,8 +740,8 @@ fn search_with_grep(path: &str, query: &str, max: usize) -> Result<Vec<SearchRes
             if let Ok(line_num) = parts[1].parse::<usize>() {
                 let file_path = parts[0].to_string();
                 // Strip the absolute search path prefix for relative paths
-                let rel_path = if file_path.starts_with(path) {
-                    file_path[path.len()..].trim_start_matches('/').to_string()
+                let rel_path = if let Some(stripped) = file_path.strip_prefix(path) {
+                    stripped.trim_start_matches('/').to_string()
                 } else {
                     file_path
                 };
@@ -780,11 +812,17 @@ fn start_file_watcher(app: tauri::AppHandle, path: String) -> Result<(), String>
 
 #[tauri::command]
 async fn chat_completion(
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
     model: String,
     messages: Vec<ChatMessage>,
 ) -> Result<String, String> {
-    let client = ai::FreeLlmClient::localhost();
+    let unified_key = state
+        .sidecar_unified_key
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone();
+
+    let client = ai::FreeLlmClient::new(&state.sidecar_base_url, &unified_key);
 
     let freellm_messages: Vec<ai::freellm::ChatMessage> = messages
         .into_iter()
@@ -814,9 +852,14 @@ fn get_current_dir() -> String {
 }
 
 #[tauri::command]
-async fn check_ai_health() -> bool {
-    let client = ai::FreeLlmClient::localhost();
-    client.health_check().await
+async fn check_ai_health(state: State<'_, AppState>) -> Result<bool, String> {
+    let unified_key = state
+        .sidecar_unified_key
+        .lock()
+        .map(|k| k.clone())
+        .unwrap_or_else(|_| "freellmapi-dev".into());
+    let client = ai::FreeLlmClient::new(&state.sidecar_base_url, &unified_key);
+    Ok(client.health_check().await)
 }
 
 // ---------------------------------------------------------------------------
@@ -947,8 +990,23 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(AppState {
-            ai_client: None,
+            sidecar_base_url: "http://127.0.0.1:3001".into(),
+            sidecar_unified_key: Mutex::new("freellmapi-dev".into()),
             keystore: Mutex::new(keystore),
+        })
+        .setup(|app| {
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let client = ai::FreeLlmClient::discover("http://127.0.0.1:3001").await;
+                let state = app_handle.state::<AppState>();
+                let api_key = client.api_key().to_string();
+                let key_preview = api_key[..api_key.len().min(20)].to_string();
+                if let Ok(mut key_guard) = state.sidecar_unified_key.lock() {
+                    *key_guard = api_key;
+                }
+                eprintln!("[tauri] Sidecar API key: {}...", key_preview);
+            });
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             list_directory,

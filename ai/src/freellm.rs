@@ -119,6 +119,73 @@ impl FreeLlmClient {
         Self::new("http://localhost:3001", "freellmapi-dev")
     }
 
+    /// Discover the unified API key from a running sidecar and create a client.
+    /// Falls back to `freellmapi-dev` if the sidecar's key endpoint is unreachable.
+    pub async fn discover(base_url: &str) -> Self {
+        let base_url = base_url.trim_end_matches('/').to_string();
+        let client = Client::new();
+        let key_url = format!("{}/api/settings/api-key", base_url);
+        let api_key = match client.get(&key_url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                let body: serde_json::Value = resp.json().await.unwrap_or_default();
+                body["apiKey"]
+                    .as_str()
+                    .unwrap_or("freellmapi-dev")
+                    .to_string()
+            }
+            _ => "freellmapi-dev".to_string(),
+        };
+        Self {
+            client,
+            base_url,
+            api_key,
+        }
+    }
+
+    /// Register a provider API key with the sidecar.
+    pub async fn register_api_key(
+        base_url: &str,
+        unified_key: &str,
+        platform: &str,
+        key: &str,
+        label: &str,
+    ) -> AiResult<()> {
+        let base_url = base_url.trim_end_matches('/').to_string();
+        let client = Client::new();
+        let url = format!("{}/api/keys", base_url);
+        let resp = client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", unified_key))
+            .json(&serde_json::json!({
+                "platform": platform,
+                "key": key,
+                "label": label,
+            }))
+            .send()
+            .await
+            .map_err(|e| AiError::HttpError(e.to_string()))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AiError::ProviderError(
+                "sidecar".into(),
+                format!("register key HTTP {}: {}", status, body),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Get the base URL of this client.
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    /// Get the API key of this client.
+    pub fn api_key(&self) -> &str {
+        &self.api_key
+    }
+
     /// Send a chat completion request (non-streaming).
     pub async fn chat_completion(
         &self,

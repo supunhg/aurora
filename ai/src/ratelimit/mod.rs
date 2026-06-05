@@ -195,7 +195,7 @@ pub struct RateLimitLedger {
     counters: DashMap<RateKey, RateCounters>,
     #[allow(dead_code)]
     #[cfg(feature = "keychain")]
-    db: Option<Connection>,
+    db: Option<std::sync::Mutex<Connection>>,
 }
 
 impl RateLimitLedger {
@@ -211,7 +211,7 @@ impl RateLimitLedger {
     pub fn with_persistence(db: Connection) -> Self {
         Self {
             counters: DashMap::new(),
-            db: Some(db),
+            db: Some(std::sync::Mutex::new(db)),
         }
     }
 
@@ -229,7 +229,7 @@ impl RateLimitLedger {
         entry.record_request(tokens_used, success);
 
         #[cfg(feature = "keychain")]
-        if let Some(ref _db) = self.db {
+        if let Some(_db) = self.db.as_ref() {
             self.persist(key, &entry);
         }
     }
