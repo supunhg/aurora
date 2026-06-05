@@ -229,7 +229,7 @@ impl RateLimitLedger {
         entry.record_request(tokens_used, success);
 
         #[cfg(feature = "keychain")]
-        if let Some(ref db) = self.db {
+        if let Some(ref _db) = self.db {
             self.persist(key, &entry);
         }
     }
