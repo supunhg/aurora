@@ -109,7 +109,8 @@ pub use quota::ProviderQuota;
 #[cfg(feature = "keychain")]
 pub mod encrypted {
     use super::*;
-    use ring::aead::{Aad, Aes256Gcm, LessSafeKey, Nonce, UnboundKey};
+    use crate::AiResult;
+    use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
     use ring::rand::{SecureRandom, SystemRandom};
     use rusqlite::Connection;
     use std::path::PathBuf;
@@ -148,7 +149,7 @@ pub mod encrypted {
             )
             .map_err(|e| crate::error::AiError::KeyStore(format!("SQLite init: {}", e)))?;
 
-            let unbound = UnboundKey::new(&Aes256Gcm, encryption_key)
+            let unbound = UnboundKey::new(&AES_256_GCM, encryption_key)
                 .map_err(|e| crate::error::AiError::KeyStore(format!("Key setup: {}", e)))?;
             let cipher = LessSafeKey::new(unbound);
             let rng = SystemRandom::new();
