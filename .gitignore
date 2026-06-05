@@ -14,3 +14,6 @@ node_modules
 # FreeLLMAPI sidecar (cloned, not vendored in git)
 /sidecar/freellmapi
 /sidecar/freellmapi/node_modules
+
+# Custom 
+session-ses*
